@@ -1,0 +1,65 @@
+digraph K_structure{
+	rankdir=BT;
+	size="8,5"
+//WORLDS List:
+	node [shape = circle] "0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail";// (,-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail)
+	node [shape = circle] "1_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail";// (-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail)
+	node [shape = doublecircle] "2_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail";// (-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail)
+	node [shape = circle] "3_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail";// (-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail)
+	node [shape = circle] "0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c";// (,-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c)
+	node [shape = circle] "1_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c";// (-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c)
+	node [shape = circle] "3_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c";// (-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c)
+	node [shape = circle] "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a";// (,-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a)
+	node [shape = circle] "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a";// (-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a)
+	node [shape = circle] "6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a";// (-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a)
+	node [shape = circle] "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail";// (,-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail)
+	node [shape = circle] "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail";// (-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail)
+	node [shape = circle] "6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail";// (-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail)
+
+
+//RANKS List:
+	{rank = same; "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a"; "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail"; }
+	{rank = same; "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a"; "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail"; }
+	{rank = same; "6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a"; "6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail"; }
+	{rank = same; "0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail"; "0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c"; }
+	{rank = same; "0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail"; "0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c"; }
+	{rank = same; "0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail"; }
+	{rank = same; "0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail"; "0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c"; }
+
+
+//EDGES List:
+	"0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c" -> "0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c" [ label = "a,c" ];
+	"0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c" -> "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" [ label = "b" ];
+	"0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c" -> "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ label = "b" ];
+	"0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c" -> "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" [ label = "b" ];
+	"0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c" -> "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ label = "b" ];
+	"0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail" -> "0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail" [ label = "a,c" ];
+	"0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail" -> "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" [ label = "b" ];
+	"0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail" -> "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ label = "b" ];
+	"0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail" -> "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" [ label = "b" ];
+	"0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail" -> "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ label = "b" ];
+	"0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail" -> "6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" [ label = "b" ];
+	"0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail" -> "6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ label = "b" ];
+	"4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" -> "0_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" [ label = "c" ];
+	"4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" -> "0_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ label = "c" ];
+	"4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" -> "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" [ label = "a,b" ];
+	"4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" -> "0_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" [ label = "c" ];
+	"4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" -> "0_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ label = "c" ];
+	"4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" -> "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ label = "a,b" ];
+	"5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" -> "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" [ label = "b,c" ];
+	"5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" -> "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ label = "b,c" ];
+	"6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" -> "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" [ label = "a" ];
+	"6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" -> "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ label = "a" ];
+	"6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" -> "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" [ label = "c" ];
+	"6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" -> "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ label = "c" ];
+	"6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" -> "6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" [ label = "b" ];
+	"6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" -> "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" [ label = "a" ];
+	"6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" -> "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ label = "a" ];
+	"6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" -> "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" [ label = "c" ];
+	"6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" -> "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ label = "c" ];
+	"6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" -> "6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ label = "b" ];
+	"0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,-tail,has_key_a,looking_c" -> "0_-has_key_b,-has_key_c,-looking_a,-looking_b,-opened,has_key_a,looking_c,tail" [ dir=both label = "a,c" ];
+	"4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" -> "4_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ dir=both label = "a,b" ];
+	"5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" -> "5_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ dir=both label = "b,c" ];
+	"6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,-tail,has_key_a,looking_a" -> "6_-has_key_b,-has_key_c,-looking_b,-looking_c,-opened,has_key_a,looking_a,tail" [ dir=both label = "b" ];
+}

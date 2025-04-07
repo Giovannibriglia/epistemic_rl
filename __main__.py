@@ -1,8 +1,13 @@
+import json
+import os
+from datetime import datetime
+
 import networkx as nx
 import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch.nn import Linear
+from torch.utils.data import random_split
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GCNConv, global_mean_pool, NNConv
 from tqdm import tqdm
@@ -65,10 +70,33 @@ class GNN(torch.nn.Module):
         return self.lin(x).squeeze(-1)
 
 
+def generate_simulation_name(prefix: str = "analysis") -> str:
+    """
+    Generates a simulation name based on the current date and time.
+
+    Args:
+        prefix (str): Prefix for the simulation name (default is "Simulation").
+
+    Returns:
+        str: A string containing the prefix and a timestamp.
+    """
+    # Get the current date and time
+    now = datetime.now()
+    # Format the date and time into a readable string
+    timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+    # Combine the prefix and timestamp
+    simulation_name = f"{prefix}_{timestamp}"
+    return simulation_name
+
+
 if __name__ == "__main__":
     path_data = "./data/ex_d_6.csv"
+
+    simulation_path = generate_simulation_name()
+    os.makedirs(simulation_path, exist_ok=True)
+
     start_df = pd.read_csv(path_data)
-    start_df = start_df
+    start_df = start_df  # [:1000]
     all_samples = []
 
     for n, rows in tqdm(
@@ -83,11 +111,20 @@ if __name__ == "__main__":
         data_obj = create_data_from_graph(graph, dist_from_goal, depth)
         all_samples.append(data_obj)
 
-    torch.save(all_samples, "complete_dataset.pt")
+    torch.save(all_samples, f"{simulation_path}/complete_dataset.pt")
 
-    loaded_samples = torch.load("complete_dataset.pt", weights_only=False)
-    loader = DataLoader(loaded_samples, batch_size=512, shuffle=True)
+    loaded_samples = torch.load(
+        f"{simulation_path}/complete_dataset.pt", weights_only=False
+    )
 
+    # Define split sizes
+    train_size = int(0.8 * len(loaded_samples))
+    val_size = len(loaded_samples) - train_size
+    # Split
+    train_dataset, val_dataset = random_split(loaded_samples, [train_size, val_size])
+
+    train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=512)
     " ************************************************************************************************************* "
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -120,7 +157,7 @@ if __name__ == "__main__":
     pbar = tqdm(range(num_epochs), desc="Training model...")
     for epoch in pbar:
         total_loss = 0
-        for batch in loader:
+        for batch in train_loader:
             batch = batch.to(device)
             optimizer.zero_grad()
             pred = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch)
@@ -129,13 +166,13 @@ if __name__ == "__main__":
             optimizer.step()
             total_loss += loss.item()
 
-        avg_loss = total_loss / len(loader)
+        avg_loss = total_loss / len(train_loader)
         pbar.set_postfix(loss=f"{avg_loss:.4f}")
 
-    torch.save(model.state_dict(), "complete_gnn_predictor.pt")
+    torch.save(model.state_dict(), f"{simulation_path}/complete_gnn_predictor.pt")
     " ************************************************************************************************************* "
 
-    model.load_state_dict(torch.load("complete_gnn_predictor.pt"))
+    model.load_state_dict(torch.load(f"{simulation_path}/complete_gnn_predictor.pt"))
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -146,7 +183,7 @@ if __name__ == "__main__":
     all_targets = []
 
     with torch.no_grad():
-        for batch in loader:
+        for batch in val_loader:
             batch = batch.to(device)
             pred = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch)
             pred_int = torch.round(pred)
@@ -158,5 +195,11 @@ if __name__ == "__main__":
     mse = F.mse_loss(preds, targets)
     print(f"\nEvaluation MSE: {mse.item():.4f}")
 
-    print(preds[100:120])
-    print(targets[100:120])
+    file_to_save = {"preds": preds.cpu().numpy(), "targets": targets.cpu().numpy()}
+
+    # Convert all arrays to lists before saving
+    data_serializable = {k: v.tolist() for k, v in file_to_save.items()}
+
+    # Save to JSON file
+    with open("data.json", "w") as f:
+        json.dump(data_serializable, f)

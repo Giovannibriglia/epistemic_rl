@@ -50,8 +50,12 @@ def process_input_graph(G: nx.Graph) -> Tuple[np.ndarray, np.ndarray, Dict[str, 
         if label_str:
             for label in label_str.split(","):
                 if label in label_to_idx:
+                    # print(u, v, label)
                     edge_attr_matrix[i, j, label_to_idx[label]] = 1
-
+    """print("\n")
+    print(adj_matrix)
+    print(edge_attr_matrix)
+    print(node_to_idx)"""
     return adj_matrix, edge_attr_matrix, node_to_idx
 
 
