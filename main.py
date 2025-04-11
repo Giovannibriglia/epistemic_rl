@@ -149,7 +149,7 @@ if __name__ == "__main__":
         use_edge_attr=use_edge_attr,
     ).to(device)
 
-    """optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = torch.nn.MSELoss()
 
     num_epochs = 1000
@@ -169,7 +169,7 @@ if __name__ == "__main__":
         avg_loss = total_loss / len(train_loader)
         pbar.set_postfix(loss=f"{avg_loss:.4f}")
 
-    torch.save(model.state_dict(), f"{simulation_path}/complete_gnn_predictor.pt")"""
+    torch.save(model.state_dict(), f"{simulation_path}/complete_gnn_predictor.pt")
     " ************************************************************************************************************* "
 
     model.load_state_dict(torch.load(f"{simulation_path}/complete_gnn_predictor.pt"))
