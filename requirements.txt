@@ -9,3 +9,5 @@ ufmt==2.0.0
 usort==1.0.4
 tqdm
 pre-commit
+torch-geometric
+pydot

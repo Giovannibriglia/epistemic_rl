@@ -12,7 +12,7 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GCNConv, global_mean_pool, NNConv
 from tqdm import tqdm
 
-from utils import create_data_from_graph
+from utils import create_data_from_graph, predict_from_graph
 
 
 class GNN(torch.nn.Module):
@@ -149,7 +149,7 @@ if __name__ == "__main__":
         use_edge_attr=use_edge_attr,
     ).to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    """optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = torch.nn.MSELoss()
 
     num_epochs = 1000
@@ -169,7 +169,7 @@ if __name__ == "__main__":
         avg_loss = total_loss / len(train_loader)
         pbar.set_postfix(loss=f"{avg_loss:.4f}")
 
-    torch.save(model.state_dict(), f"{simulation_path}/complete_gnn_predictor.pt")
+    torch.save(model.state_dict(), f"{simulation_path}/complete_gnn_predictor.pt")"""
     " ************************************************************************************************************* "
 
     model.load_state_dict(torch.load(f"{simulation_path}/complete_gnn_predictor.pt"))
@@ -178,7 +178,6 @@ if __name__ == "__main__":
     model.to(device)
     model.eval()
 
-    model.eval()
     all_preds = []
     all_targets = []
 
@@ -203,3 +202,15 @@ if __name__ == "__main__":
     # Save to JSON file
     with open("data.json", "w") as f:
         json.dump(data_serializable, f)
+
+    " ************************************************************************************************************* "
+    print("\n EXAMPLE OF USAGE IN REAL-WORLD SETTINGS: ")
+    rows = start_df.iloc[0, :]
+    path_graph = rows[" Path"]
+    depth = rows[" Depth"]
+
+    pred = predict_from_graph(model, path_graph, depth, device)
+
+    true = rows[" Distance From Goal"]
+    print("Pred: :", pred)
+    print("True: :", true)

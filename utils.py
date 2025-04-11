@@ -107,3 +107,47 @@ def create_data_from_graph(G: nx.DiGraph, dist_from_goal: int, depth: int) -> Da
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y)
 
     return data
+
+
+def predict_from_graph(
+    model: torch.nn.Module,
+    graph_path: str,
+    depth: int,
+    device: torch.device = "cuda",
+) -> float:
+    """
+    Loads a graph from a file, processes it, and runs inference with the trained model.
+
+    Args:
+        model (torch.nn.Module): The trained GNN model.
+        graph_path (str): Path to the .dot file of the graph.
+        depth (int): Depth to include as node feature.
+        device (torch.device): The device to run inference on.
+
+    Returns:
+        float: The predicted distance from the goal.
+    """
+    # 1. Load the graph from the .dot file
+    G = nx.Graph(nx.nx_pydot.read_dot(graph_path))
+
+    # 2. Dummy target value (not used for inference, just for Data creation)
+    dummy_dist_from_goal = 0
+
+    # 3. Create PyG Data object
+    data_obj = create_data_from_graph(G, dummy_dist_from_goal, depth)
+
+    # 4. Move data to the appropriate device and add batch index
+    data_obj = data_obj.to(device)
+    data_obj.batch = torch.zeros(
+        data_obj.num_nodes, dtype=torch.long, device=device
+    )  # single graph = batch 0
+
+    # 5. Set model to eval mode and predict
+    model.eval()
+    with torch.no_grad():
+        pred = model(
+            data_obj.x, data_obj.edge_index, data_obj.edge_attr, data_obj.batch
+        )
+        pred_int = torch.round(pred)
+
+    return pred_int.item()
