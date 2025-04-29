@@ -90,23 +90,39 @@ def generate_simulation_name(prefix: str = "analysis") -> str:
 
 
 if __name__ == "__main__":
-    path_data = "./data/ex_d_6.csv"
+    TRAIN_SIZE_PERCENTAGE = 0.8
 
-    simulation_path = generate_simulation_name()
+    path_data = "./data/CC_3_3_3__pl_6_d_9.csv"
+    name_dataset = os.path.basename(path_data).replace(".csv", "")
+    simulation_path = "results/" + generate_simulation_name(name_dataset)
     os.makedirs(simulation_path, exist_ok=True)
 
-    start_df = pd.read_csv(path_data)
-    start_df = start_df  # [:1000]
-    all_samples = []
+    colnames = ["Path", "Depth", "Distance From Goal", "Goal"]
+    records = []
 
+    with open(path_data, newline="") as f:
+        next(f)  # skip original header
+        for raw in f:
+            # Keep everything after the 3rd comma together as "Goal"
+            path, depth, dist, goal = raw.rstrip("\n").split(",", 3)
+            records.append([path, depth, dist, goal])
+
+    start_df = pd.DataFrame(records, columns=colnames)
+    # start_df = start_df[:1000]
+
+    all_samples = []
     for n, rows in tqdm(
         start_df.iterrows(), total=len(start_df), desc="pre-processing data..."
     ):
-        # state = rows["State"]
-        path_graph = rows[" Path"]
-        graph = nx.Graph(nx.nx_pydot.read_dot(path_graph))
-        depth = rows[" Depth"]
-        dist_from_goal = rows[" Distance From Goal"]
+        path_graph = "./" + rows["Path"]
+        graph = nx.DiGraph(nx.nx_pydot.read_dot(path_graph))
+        # graph = nx.relabel_nodes(graph, lambda n: int(n))
+        # for u, v, data in graph.edges(data=True):
+        # strip the extra quotes that Graphviz puts around attribute values
+        # edge_label = data["label"].strip('"')
+        # print(f"{u} → {v} on {edge_label}")
+        depth = int(rows["Depth"])
+        dist_from_goal = int(rows["Distance From Goal"])
 
         data_obj = create_data_from_graph(graph, dist_from_goal, depth)
         all_samples.append(data_obj)
@@ -118,7 +134,7 @@ if __name__ == "__main__":
     )
 
     # Define split sizes
-    train_size = int(0.8 * len(loaded_samples))
+    train_size = int(TRAIN_SIZE_PERCENTAGE * len(loaded_samples))
     val_size = len(loaded_samples) - train_size
     # Split
     train_dataset, val_dataset = random_split(loaded_samples, [train_size, val_size])
@@ -149,7 +165,7 @@ if __name__ == "__main__":
         use_edge_attr=use_edge_attr,
     ).to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(model.parameters())
     loss_fn = torch.nn.MSELoss()
 
     num_epochs = 1000
@@ -169,10 +185,10 @@ if __name__ == "__main__":
         avg_loss = total_loss / len(train_loader)
         pbar.set_postfix(loss=f"{avg_loss:.4f}")
 
-    torch.save(model.state_dict(), f"{simulation_path}/complete_gnn_predictor.pt")
+    torch.save(model.state_dict(), f"{simulation_path}/gnn_predictor.pt")
     " ************************************************************************************************************* "
 
-    model.load_state_dict(torch.load(f"{simulation_path}/complete_gnn_predictor.pt"))
+    model.load_state_dict(torch.load(f"{simulation_path}/gnn_predictor.pt"))
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -200,17 +216,18 @@ if __name__ == "__main__":
     data_serializable = {k: v.tolist() for k, v in file_to_save.items()}
 
     # Save to JSON file
-    with open("data.json", "w") as f:
+    with open(f"{simulation_path}/data.json", "w") as f:
         json.dump(data_serializable, f)
 
     " ************************************************************************************************************* "
     print("\n EXAMPLE OF USAGE IN REAL-WORLD SETTINGS: ")
     rows = start_df.iloc[0, :]
-    path_graph = rows[" Path"]
-    depth = rows[" Depth"]
+    path_graph = "./" + rows["Path"]
+    G = nx.DiGraph(nx.nx_pydot.read_dot(path_graph))
+    depth = rows["Depth"]
 
-    pred = predict_from_graph(model, path_graph, depth, device)
+    pred = predict_from_graph(model, G, depth, device)
 
-    true = rows[" Distance From Goal"]
+    true = rows["Distance From Goal"]
     print("Pred: :", pred)
     print("True: :", true)
