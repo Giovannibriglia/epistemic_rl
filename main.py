@@ -92,7 +92,7 @@ def generate_simulation_name(prefix: str = "analysis") -> str:
 if __name__ == "__main__":
     TRAIN_SIZE_PERCENTAGE = 0.8
 
-    path_data = "./data/CC_3_3_3__pl_6_d_9.csv"
+    path_data = "old_data/CC_3_3_3__pl_6_d_9.csv"
     name_dataset = os.path.basename(path_data).replace(".csv", "")
     simulation_path = "results/" + generate_simulation_name(name_dataset)
     os.makedirs(simulation_path, exist_ok=True)
@@ -112,14 +112,14 @@ if __name__ == "__main__":
 
     all_samples = []
     for n, rows in tqdm(
-        start_df.iterrows(), total=len(start_df), desc="pre-processing data..."
+        start_df.iterrows(), total=len(start_df), desc="pre-processing old_data..."
     ):
         path_graph = "./" + rows["Path"]
         graph = nx.DiGraph(nx.nx_pydot.read_dot(path_graph))
         # graph = nx.relabel_nodes(graph, lambda n: int(n))
-        # for u, v, data in graph.edges(data=True):
+        # for u, v, old_data in graph.edges(old_data=True):
         # strip the extra quotes that Graphviz puts around attribute values
-        # edge_label = data["label"].strip('"')
+        # edge_label = old_data["label"].strip('"')
         # print(f"{u} → {v} on {edge_label}")
         depth = int(rows["Depth"])
         dist_from_goal = int(rows["Distance From Goal"])
@@ -150,8 +150,8 @@ if __name__ == "__main__":
     node_input_dim = 2
 
     # If you have n distinct edge labels => edge_attr has shape [num_edges, n].
-    # Let’s say from your data the dimension is 'num_labels'. If you’re not sure,
-    # you can check the shape of `data.edge_attr`.
+    # Let’s say from your old_data the dimension is 'num_labels'. If you’re not sure,
+    # you can check the shape of `old_data.edge_attr`.
     edge_input_dim = 0
     if use_edge_attr:
         # Possibly read from a sample:
@@ -216,7 +216,7 @@ if __name__ == "__main__":
     data_serializable = {k: v.tolist() for k, v in file_to_save.items()}
 
     # Save to JSON file
-    with open(f"{simulation_path}/data.json", "w") as f:
+    with open(f"{simulation_path}/old_data.json", "w") as f:
         json.dump(data_serializable, f)
 
     " ************************************************************************************************************* "

@@ -11,3 +11,5 @@ tqdm
 pre-commit
 torch-geometric
 pydot
+onnx
+onnxscript
