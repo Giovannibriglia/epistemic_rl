@@ -1,6 +1,6 @@
 import torch
 
-# from src.preprocessing import GraphDataPipeline
+from src.preprocessing import GraphDataPipeline
 from src.utils import get_dataloaders, seed_everything, select_model, split_samples
 
 if __name__ == "__main__":
@@ -11,24 +11,27 @@ if __name__ == "__main__":
     FOLDER_DATA = f"out/NN/Training_{DOMAIN}"
     UNREACHABLE_STATE_VALUE = -1  # 1_000_000 or -1
 
+    MODELS = [
+        "distance_estimator",
+        # "reachability_classifier",
+    ]
+
     kinds_of_ordering = ["hash"]  # , "map"
     kinds_of_data = ["separated", "merged"]
     use_goals = [True, False]
 
     MAX_SAMPLES_FOR_CLASS = 15000
     MAX_UNREACHABLE_SAMPLES_RATIO = 0.15
+    N_TRAIN_EPOCHS = 200
 
     for KIND_OF_ORDERING in kinds_of_ordering:
         for KIND_OF_DATA in kinds_of_data:
             for USE_GOAL in use_goals:
 
-                print(
-                    f"\n Domain: {DOMAIN} | {KIND_OF_ORDERING} | {KIND_OF_DATA} | Use goal: {USE_GOAL}",
-                )
-                path_save_data = f"new_data/{DOMAIN}/{KIND_OF_ORDERING}_{KIND_OF_DATA}"
+                path_save_data = f"data/{DOMAIN}/{KIND_OF_ORDERING}_{KIND_OF_DATA}"
                 path_save_data += "_goal" if USE_GOAL else "_no_goal"
 
-                """pipe = GraphDataPipeline(
+                pipe = GraphDataPipeline(
                     folder_data=FOLDER_DATA,
                     kind_of_ordering=KIND_OF_ORDERING,
                     kind_of_data=KIND_OF_DATA,
@@ -43,19 +46,17 @@ if __name__ == "__main__":
                     extra_params={
                         "max_unreachable_ratio": MAX_UNREACHABLE_SAMPLES_RATIO,
                     },
-                )"""
+                )
 
                 # Later, to reload:
                 data_path = path_save_data + "/dataloader_info.pt"
                 data = torch.load(data_path, weights_only=False)
                 samples = data["samples"]
 
-                MODELS = [
-                    "new_distance_estimator",
-                    "new_reachability_classifier",
-                ]
-
                 for model_name in MODELS:
+                    print(
+                        f"\n Domain: {DOMAIN} | {KIND_OF_ORDERING} | {KIND_OF_DATA} | Use goal: {USE_GOAL} | Model: {model_name}",
+                    )
                     samples_copy = samples.copy()
 
                     if "reachability_classifier" in model_name:
@@ -82,6 +83,7 @@ if __name__ == "__main__":
                         else:
                             d[ss] = 1
                     print("Target values: ", d)
+
                     train_samples, eval_samples = split_samples(samples_copy)
 
                     train_loader, val_loader = get_dataloaders(
@@ -102,7 +104,7 @@ if __name__ == "__main__":
                     m.train(
                         train_loader,
                         val_loader,
-                        n_epochs=5,
+                        n_epochs=N_TRAIN_EPOCHS,
                         checkpoint_dir=path_model,
                     )
 
@@ -116,7 +118,7 @@ if __name__ == "__main__":
                         out = m.predict_single("state.dot", 5)
                     print("PyTorch output: ", out)
 
-                    onnx_model_file = f"{path_model}/model.onnx"
+                    onnx_model_file = f"{path_model}/{model_name}.onnx"
                     m.to_onnx(onnx_model_file)
 
                     sss = ["state.dot", "state.dot"]
@@ -125,10 +127,5 @@ if __name__ == "__main__":
                     if USE_GOAL:
                         out_onnx = m.try_onnx(onnx_model_file, sss, ddd, ggg)
                     else:
-                        out_onnx = m.try_onnx(
-                            onnx_model_file,
-                            onnx_model_file,
-                            sss,
-                            ddd,
-                        )
+                        out_onnx = m.try_onnx(onnx_model_file, sss, ddd)
                     print("Out onnx: ", out_onnx)

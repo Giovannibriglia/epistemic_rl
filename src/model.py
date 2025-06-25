@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from pathlib import Path
 
 import torch
 from matplotlib import pyplot as plt
@@ -164,11 +165,10 @@ class BaseModel(ABC):
             if "loss" in key:
                 plt.plot(epochs, history[key], label=key)
         plt.xlabel("Epoch")
-        plt.ylabel("Loss")
+        plt.ylabel("Train Loss")
         plt.legend(loc="best")
-        plt.title("Loss Curves")
         plt.tight_layout()
-        plt.savefig(f"{checkpoint_dir}/loss.png")
+        plt.savefig(f"{checkpoint_dir}/train_loss.png")
         plt.show()
 
         # 2) All other metrics
@@ -177,15 +177,78 @@ class BaseModel(ABC):
             if "loss" not in key:
                 plt.plot(epochs, history[key], label=key)
         plt.xlabel("Epoch")
-        plt.ylabel("Metric")
+        plt.ylabel("Validation Metric")
         plt.legend(loc="best")
-        plt.title("Other Metrics")
         plt.tight_layout()
-        plt.savefig(f"{checkpoint_dir}/metrics.png")
+        plt.savefig(f"{checkpoint_dir}/validation_metrics.png")
         plt.show()
 
         return history
 
+    def to_onnx(self, onnx_path: str | Path, use_goal: bool = True) -> None:
+        """
+        Export the *trained* DistanceEstimator to ONNX with **dynamic** sizes:
+
+            • any number of graphs     (batch axis)
+            • any number of nodes/edges in each graph
+
+        The exported model therefore runs both single-graph *and* mini-batch
+        inference in ONNX Runtime.
+        """
+        onnx_wrapper = self._get_onnx_wrapper()
+
+        onnx_path = Path(onnx_path)
+        self.model.eval()
+
+        # dummy – just to trace the graph; real sizes don’t matter
+        N_s, E_s = 3, 4  # state  graph:  3 nodes – 4 edges
+        N_g, E_g = 3, 4  # goal   graph:  3 nodes – 4 edges
+        B = 2  # two graphs in the mini-batch
+
+        dummy_inputs = (
+            torch.arange(N_s, dtype=torch.float32),  # state_node_names
+            torch.zeros((2, E_s), dtype=torch.int64),  # state_edge_index
+            torch.zeros((E_s, 1), dtype=torch.float32),  # state_edge_attr
+            torch.tensor([0, 0, 1], dtype=torch.int64),  # state_batch
+            torch.zeros(B, dtype=torch.float32),  # depth  (B × 1)
+            torch.arange(N_g, dtype=torch.float32),  # goal_node_names
+            torch.zeros((2, E_g), dtype=torch.int64),  # goal_edge_index
+            torch.zeros((E_g, 1), dtype=torch.float32),  # goal_edge_attr
+            torch.tensor([0, 0, 1], dtype=torch.int64),  # goal_batch
+        )
+
+        torch.onnx.export(
+            onnx_wrapper(self.model).cpu(),  # << wrapped core
+            dummy_inputs,
+            onnx_path.as_posix(),
+            opset_version=18,  # ScatterND w/ reduction
+            input_names=[
+                "state_node_names",
+                "state_edge_index",
+                "state_edge_attr",
+                "state_batch",
+                "depth",
+                "goal_node_names",
+                "goal_edge_index",
+                "goal_edge_attr",
+                "goal_batch",
+            ],
+            output_names=["distance"],
+            dynamic_axes={  # ← make everything var-len
+                "state_node_names": {0: "Ns"},
+                "state_edge_index": {1: "Es"},
+                "state_edge_attr": {0: "Es"},
+                "state_batch": {0: "Ns"},
+                "depth": {0: "B"},  # B = batch size
+                "goal_node_names": {0: "Ng"},
+                "goal_edge_index": {1: "Eg"},
+                "goal_edge_attr": {0: "Eg"},
+                "goal_batch": {0: "Ng"},
+                "distance": {0: "B"},
+            },
+        )
+        print("ONNX export complete ✅")
+
     @abstractmethod
-    def to_onnx(self, path_file):
+    def _get_onnx_wrapper(self):
         raise NotImplementedError

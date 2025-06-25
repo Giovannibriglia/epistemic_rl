@@ -29,10 +29,14 @@ from torch_geometric.data import Batch, Data
 from torch_geometric.utils import from_networkx
 
 from src.model import BaseModel
-from src.models.distance_estimator import DistanceEstimator
-from src.models.new_distance_estimator import NewDistanceEstimator
-from src.models.new_reachability_classifier import NewReachabilityClassifier
-from src.models.reachability_classifier import ReachabilityClassifier
+from src.models.distance_estimator import (
+    DistanceEstimator,
+    OnnxDistanceEstimatorWrapper,
+)
+from src.models.reachability_classifier import (
+    OnnxReachabilityClassifierWrapper,
+    ReachabilityClassifier,
+)
 
 
 class PrecomputedGraphDataset(Dataset):
@@ -274,109 +278,6 @@ def graph_collate_fn(batch):
     return collated
 
 
-_TWO48_MINUS1 = float(2**48 - 1)  # for the ID normaliser
-
-
-# 2) Build a thin ONNX-friendly wrapper
-class OnnxWrapper(nn.Module):
-    """
-     Wraps `NewDistanceEstimator` so that ONNX sees only *plain tensors* –
-     not PyG Data objects.  The wrapper re-implements _encode() for raw
-     tensors, including a scatter-based global-mean-pool that is 100 % ONNX
-    -export-able.
-    """
-
-    def __init__(self, core: "NewDistanceEstimator"):
-        super().__init__()
-        self.core = core  # the trained model √
-
-    # --------------------------------------------------------------------- util
-    @staticmethod
-    def _global_mean(x, batch):
-        """
-                x     : [N, F]       (node embeddings)
-                batch : [N]  (graph-id per node, 0 … B-1)
-        1
-                Pure-Torch implementation, ONNX-friendly, **no external scatter lib**.
-        """
-        # 1) accumulate sums per graph  ────────────────────────────────
-        B = batch.max() + 1  # <— remains a Tensor!
-        sums = torch.zeros(B, x.size(1), dtype=x.dtype, device=x.device)
-        sums = sums.index_add(0, batch, x)  # [B, F]
-
-        # 2) node counts per graph  ───────────────────────────────────
-        ones = torch.ones_like(batch, dtype=x.dtype)
-        cnts = torch.zeros(B, 1, dtype=x.dtype, device=x.device)
-        cnts = cnts.index_add(0, batch, ones.unsqueeze(1))  # [B, 1]
-
-        # 3) mean = sum / count  ( +ε avoids div-by-0 for empty graphs )
-        return sums / cnts.clamp(min=1.0)
-
-    # ----------------------------------------------------------------- encoder
-    def _encode_raw(
-        self, node_ids, edge_index, edge_attr, batch, conv1: nn.Module, conv2: nn.Module
-    ):
-        """
-        A *tensor-only* version of NewDistanceEstimator._encode().
-        Shapes are identical to the tensors fed from ONNX.
-        """
-        # 1) node scalar → [N, node_emb_dim]
-        norm = torch.clamp((node_ids.float() + 2.0) / _TWO48_MINUS1, 0.0, 1.0)
-        x = self.core.id_mlp(norm.unsqueeze(1))
-
-        # 2) edge scalar → [E, edge_emb_dim]
-        e = self.core.edge_mlp(edge_attr.float())
-
-        # 3) two GINEConv layers
-        x = F.relu(conv1(x, edge_index, e))
-        x = F.relu(conv2(x, edge_index, e))
-
-        # 4) global mean pool → [B, hidden_dim]
-        return self._global_mean(x, batch)
-
-    # ---------------------------------------------------------------- forward
-    def forward(
-        self,
-        s_node_ids,
-        s_edge_index,
-        s_edge_attr,
-        s_batch,
-        depth,
-        g_node_ids,
-        g_edge_index,
-        g_edge_attr,
-        g_batch,
-    ):
-        """
-        *Exactly* the signature you will export / feed from ONNX.
-        """
-        # ---------- state graph ----------
-        s_emb = self._encode_raw(
-            s_node_ids,
-            s_edge_index,
-            s_edge_attr,
-            s_batch,
-            self.core.state_conv1,
-            self.core.state_conv2,
-        )
-        # ---------- goal graph (can be empty) ----------
-        if self.core.use_goal and g_node_ids.numel() > 0:
-            g_emb = self._encode_raw(
-                g_node_ids,
-                g_edge_index,
-                g_edge_attr,
-                g_batch,
-                self.core.goal_conv1,
-                self.core.goal_conv2,
-            )
-            rep = torch.cat([s_emb, g_emb], dim=1)  # [B, 2·H]
-        else:
-            rep = s_emb  # [B,   H]
-
-        z = torch.cat([rep, depth.float().view(-1, 1)], dim=1)  # + depth
-        return self.core.regressor(z).squeeze(1)  # → [B]
-
-
 class DistanceEstimatorModel(BaseModel):
     def __init__(
         self,
@@ -470,67 +371,8 @@ class DistanceEstimatorModel(BaseModel):
         pred = self.predict_batch(batch).item()
         return pred
 
-    def to_onnx(self, onnx_path: str | Path) -> None:
-        """
-        Export the *trained* DistanceEstimator to ONNX with **dynamic** sizes:
-
-            • any number of graphs     (batch axis)
-            • any number of nodes/edges in each graph
-
-        The exported model therefore runs both single-graph *and* mini-batch
-        inference in ONNX Runtime.
-        """
-        onnx_path = Path(onnx_path)
-        self.model.eval()
-
-        # dummy – just to trace the graph; real sizes don’t matter
-        N_s, E_s = 3, 4  # state  graph:  3 nodes – 4 edges
-        N_g, E_g = 3, 4  # goal   graph:  3 nodes – 4 edges
-        B = 2  # two graphs in the mini-batch
-
-        dummy_inputs = (
-            torch.arange(N_s, dtype=torch.float32),  # state_node_names
-            torch.zeros((2, E_s), dtype=torch.int64),  # state_edge_index
-            torch.zeros((E_s, 1), dtype=torch.float32),  # state_edge_attr
-            torch.tensor([0, 0, 1], dtype=torch.int64),  # state_batch
-            torch.zeros(B, dtype=torch.float32),  # depth  (B × 1)
-            torch.arange(N_g, dtype=torch.float32),  # goal_node_names
-            torch.zeros((2, E_g), dtype=torch.int64),  # goal_edge_index
-            torch.zeros((E_g, 1), dtype=torch.float32),  # goal_edge_attr
-            torch.tensor([0, 0, 1], dtype=torch.int64),  # goal_batch
-        )
-
-        torch.onnx.export(
-            OnnxWrapper(self.model).cpu(),  # << wrapped core
-            dummy_inputs,
-            onnx_path.as_posix(),
-            opset_version=18,  # ScatterND w/ reduction
-            input_names=[
-                "state_node_names",
-                "state_edge_index",
-                "state_edge_attr",
-                "state_batch",
-                "depth",
-                "goal_node_names",
-                "goal_edge_index",
-                "goal_edge_attr",
-                "goal_batch",
-            ],
-            output_names=["distance"],
-            dynamic_axes={  # ← make everything var-len
-                "state_node_names": {0: "Ns"},
-                "state_edge_index": {1: "Es"},
-                "state_edge_attr": {0: "Es"},
-                "state_batch": {0: "Ns"},
-                "depth": {0: "B"},  # B = batch size
-                "goal_node_names": {0: "Ng"},
-                "goal_edge_index": {1: "Eg"},
-                "goal_edge_attr": {0: "Eg"},
-                "goal_batch": {0: "Ng"},
-                "distance": {0: "B"},
-            },
-        )
-        print("ONNX export complete ✅")
+    def _get_onnx_wrapper(self):
+        return OnnxDistanceEstimatorWrapper
 
     def try_onnx(
         self,
@@ -549,88 +391,89 @@ class DistanceEstimatorModel(BaseModel):
         goal_dot_files  : list[str] | None – optional DOT files of *goal* graphs
         """
         import onnxruntime as ort
-        from torch_geometric.utils import from_networkx
 
-        def _parse_dot(path: Path) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-            """read DOT → PyG tensors (node-ids, edge_index, edge_attr)"""
-
-            G = _load_dot(path, True)
-            for n, d in G.nodes(data=True):
-                d["shape"] = {"circle": 0, "doublecircle": 1}.get(
-                    d.get("shape", "circle"), 0
-                )
-            for u, v, d in G.edges(data=True):
-                d["edge_label"] = int(str(d.get("label", "0")).strip('"'))
-
-            data = from_networkx(G)
-            node_ids = torch.tensor([int(x) for x in G.nodes()], dtype=torch.float32)
-            return node_ids, data.edge_index.long(), data.edge_label.view(-1, 1).float()
-
-        # ------------- build a *concatenated* big graph --------------------
-        #
-        #    Each sample keeps its own graph-id via the *_batch* arrays;
-        #    edge-indices are offset so that node indexing stays correct.
-        #
-        s_nodes, s_edges, s_attrs, s_batch = [], [], [], []
-        g_nodes, g_edges, g_attrs, g_batch = [], [], [], []
-
-        cum_state = 0
-        cum_goal = 0
-        for g_idx, s_file in enumerate(state_dot_files):
-            n_id, e_idx, e_attr = _parse_dot(Path(s_file))
-            s_nodes.append(n_id)
-            s_edges.append(e_idx + cum_state)  # offset
-            s_attrs.append(e_attr)
-            s_batch.append(torch.full((n_id.size(0),), g_idx, dtype=torch.int64))
-            cum_state += n_id.size(0)
-
-        if goal_dot_files is not None:
-            print(goal_dot_files)
-            for g_idx, g_file in enumerate(goal_dot_files):
-                print(g_idx, g_file)
-                n_id, e_idx, e_attr = _parse_dot(Path(g_file))
-                g_nodes.append(n_id)
-                g_edges.append(e_idx + cum_goal)  # offset
-                g_attrs.append(e_attr)
-                g_batch.append(torch.full((n_id.size(0),), g_idx, dtype=torch.int64))
-                cum_goal += n_id.size(0)
-
-        # concatenate everything -------------------------------------------------
-        state_node_names = torch.cat(s_nodes)  # [Ns]
-        state_edge_index = torch.cat(s_edges, dim=1)  # [2,Es]
-        state_edge_attr = torch.cat(s_attrs)  # [Es,1]
-        state_batch = torch.cat(s_batch)  # [Ns]
-
-        if goal_dot_files is not None:
-            goal_node_names = torch.cat(g_nodes)  # [Ng]
-            goal_edge_index = torch.cat(g_edges, dim=1)  # [2,Eg]
-            goal_edge_attr = torch.cat(g_attrs)  # [Eg,1]
-            goal_batch = torch.cat(g_batch)  # [Ng]
-        else:  # empty goal
-            goal_node_names = torch.empty(0, dtype=torch.float32)
-            goal_edge_index = torch.empty((2, 0), dtype=torch.int64)
-            goal_edge_attr = torch.empty((0, 1), dtype=torch.float32)
-            goal_batch = torch.empty(0, dtype=torch.int64)
-
-        depth = torch.as_tensor(depths, dtype=torch.float32)  # [B]
-
-        # feed-dict ---------------------------------------------------------------
-        feed = {
-            "state_node_names": state_node_names.numpy(),
-            "state_edge_index": state_edge_index.numpy(),
-            "state_edge_attr": state_edge_attr.numpy(),
-            "state_batch": state_batch.numpy(),
-            "depth": depth.numpy(),
-            "goal_node_names": goal_node_names.numpy(),
-            "goal_edge_index": goal_edge_index.numpy(),
-            "goal_edge_attr": goal_edge_attr.numpy(),
-            "goal_batch": goal_batch.numpy(),
-        }
-
-        # inference ---------------------------------------------------------------
+        feed = preprocess_for_onnx(state_dot_files, depths, goal_dot_files)
+        # inference ------- --------------------------------------------------------
         ort_sess = ort.InferenceSession(str(onnx_path))
         distance = ort_sess.run(None, feed)[0]  # → np.ndarray  shape [B]
         return distance
+
+
+def preprocess_for_onnx(
+    state_dot_files: Sequence[str | Path],
+    depths: Sequence[float | int],
+    goal_dot_files: Optional[Sequence[str | Path]] = None,
+):
+    def _parse_dot(path: Path) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """read DOT → PyG tensors (node-ids, edge_index, edge_attr)"""
+
+        G = _load_dot(path, True)
+        for n, d in G.nodes(data=True):
+            d["shape"] = {"circle": 0, "doublecircle": 1}.get(
+                d.get("shape", "circle"), 0
+            )
+        for u, v, d in G.edges(data=True):
+            d["edge_label"] = int(str(d.get("label", "0")).strip('"'))
+
+        data = from_networkx(G)
+        node_ids = torch.tensor([int(x) for x in G.nodes()], dtype=torch.float32)
+        return node_ids, data.edge_index.long(), data.edge_label.view(-1, 1).float()
+
+    # ------------- build a *concatenated* big graph --------------------
+    #
+    #    Each sample keeps its own graph-id via the *_batch* arrays;
+    #    edge-indices are offset so that node indexing stays correct.
+    #
+    s_nodes, s_edges, s_attrs, s_batch = [], [], [], []
+    g_nodes, g_edges, g_attrs, g_batch = [], [], [], []
+
+    cum_state = 0
+    cum_goal = 0
+    for g_idx, s_file in enumerate(state_dot_files):
+        n_id, e_idx, e_attr = _parse_dot(Path(s_file))
+        s_nodes.append(n_id)
+        s_edges.append(e_idx + cum_state)  # offset
+        s_attrs.append(e_attr)
+        s_batch.append(torch.full((n_id.size(0),), g_idx, dtype=torch.int64))
+        cum_state += n_id.size(0)
+
+    if goal_dot_files is not None:
+        for g_idx, g_file in enumerate(goal_dot_files):
+            n_id, e_idx, e_attr = _parse_dot(Path(g_file))
+            g_nodes.append(n_id)
+            g_edges.append(e_idx + cum_goal)  # offset
+            g_attrs.append(e_attr)
+            g_batch.append(torch.full((n_id.size(0),), g_idx, dtype=torch.int64))
+            cum_goal += n_id.size(0)
+
+    # concatenate everything -------------------------------------------------
+    state_node_names = torch.cat(s_nodes)  # [Ns]
+    state_edge_index = torch.cat(s_edges, dim=1)  # [2,Es]
+    state_edge_attr = torch.cat(s_attrs)  # [Es,1]
+    state_batch = torch.cat(s_batch)  # [Ns]
+
+    depth = torch.as_tensor(depths, dtype=torch.float32)  # [B]
+
+    feed = {
+        "state_node_names": state_node_names.numpy(),
+        "state_edge_index": state_edge_index.numpy(),
+        "state_edge_attr": state_edge_attr.numpy(),
+        "state_batch": state_batch.numpy(),
+        "depth": depth.numpy(),
+    }
+
+    if goal_dot_files is not None:
+        goal_node_names = torch.cat(g_nodes)  # [Ng]
+        goal_edge_index = torch.cat(g_edges, dim=1)  # [2,Eg]
+        goal_edge_attr = torch.cat(g_attrs)  # [Eg,1]
+        goal_batch = torch.cat(g_batch)  # [Ng]
+
+        feed["goal_node_names"] = goal_node_names.numpy()
+        feed["goal_edge_index"] = goal_edge_index.numpy()
+        feed["goal_edge_attr"] = goal_edge_attr.numpy()
+        feed["goal_batch"] = goal_batch.numpy()
+
+    return feed
 
 
 class ReachabilityClassifierModel(BaseModel):
@@ -738,8 +581,32 @@ class ReachabilityClassifierModel(BaseModel):
         prob = self.predict_batch(batch).item()
         return {"prob_reachable": prob, "reachable": prob >= threshold}
 
-    def to_onnx(self, path_file):
-        pass
+    def _get_onnx_wrapper(self):
+        return OnnxReachabilityClassifierWrapper
+
+    def try_onnx(
+        self,
+        onnx_path: str | Path,
+        state_dot_files: Sequence[str | Path],
+        depths: Sequence[float | int],
+        goal_dot_files: Optional[Sequence[str | Path]] = None,
+    ) -> np.ndarray:
+        """
+        Run a **batch** of (state, goal, depth) samples through ONNX Runtime.
+
+        Parameters
+        ----------
+        state_dot_files : list[str]   – DOT files of *state* graphs
+        depths          : list[int]   – raw depth values (same length as batch)
+        goal_dot_files  : list[str] | None – optional DOT files of *goal* graphs
+        """
+        import onnxruntime as ort
+
+        feed = preprocess_for_onnx(state_dot_files, depths, goal_dot_files)
+        # inference ------- --------------------------------------------------------
+        ort_sess = ort.InferenceSession(str(onnx_path))
+        reachability = ort_sess.run(None, feed)[0]  # → np.ndarray  shape [B]
+        return reachability
 
 
 def select_model(model_name: str = "distance_estimator", use_goal: bool = True):
@@ -747,33 +614,13 @@ def select_model(model_name: str = "distance_estimator", use_goal: bool = True):
     if model_name == "distance_estimator":
         model = DistanceEstimatorModel(
             DistanceEstimator,
-            in_channels_node=1,
-            hidden_dim=64,
             use_goal=use_goal,
-            num_relations=64,
         )
         return model
 
     elif model_name == "reachability_classifier":
         model = ReachabilityClassifierModel(
             ReachabilityClassifier,
-            in_channels_node=1,
-            hidden_dim=64,
-            use_goal=use_goal,
-            num_relations=64,
-        )
-        return model
-
-    elif model_name == "new_distance_estimator":
-        model = DistanceEstimatorModel(
-            NewDistanceEstimator,
-            use_goal=use_goal,
-        )
-        return model
-
-    elif model_name == "new_reachability_classifier":
-        model = ReachabilityClassifierModel(
-            NewReachabilityClassifier,
             use_goal=use_goal,
         )
         return model
