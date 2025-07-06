@@ -30,6 +30,7 @@ class GraphDataPipeline:
         max_samples_for_prob: int,
         max_unreachable_ratio: float = 0.3,
         use_goal: bool = True,
+        use_depth: bool = True,
         UNREACHABLE_STATE_VALUE: int = 1_000_000,
         GOAL_DISTANCE_TO_REPLACE: int | None = -1,
     ):
@@ -39,6 +40,7 @@ class GraphDataPipeline:
         self.max_samples = max_samples_for_prob
         self.max_unreachable_ratio = max_unreachable_ratio
         self.use_goal = use_goal
+        self.use_depth = use_depth
         self.UNREACHABLE_STATE_VALUE = UNREACHABLE_STATE_VALUE
         self.GOAL_DISTANCE_TO_REPLACE = GOAL_DISTANCE_TO_REPLACE
 
@@ -120,7 +122,7 @@ class GraphDataPipeline:
         ):
             s = preprocess_sample(
                 row["Path State"],
-                int(row["Depth"]),
+                int(row["Depth"]) if self.use_depth else None,
                 int(row["Distance From Goal"]),
                 row["Goal"] if self.use_goal else None,
             )

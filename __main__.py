@@ -6,10 +6,13 @@ from src.utils import get_dataloaders, seed_everything, select_model, split_samp
 if __name__ == "__main__":
     seed_everything()
 
-    DOMAIN = "CC_3_2_3"
+    DOMAIN = "CC_2_2_3"
+
+    PATH_SAVE_DATA = "./data_no_depth"
+    PATH_SAVE_MODEL = "./trained_models_no_depth"
 
     FOLDER_DATA = f"out/NN/Training_{DOMAIN}"
-    UNREACHABLE_STATE_VALUE = -1  # 1_000_000 or -1
+    UNREACHABLE_STATE_VALUE = 1_000_000  # 1_000_000 or -1
 
     MODELS = [
         "distance_estimator",
@@ -19,6 +22,7 @@ if __name__ == "__main__":
     kinds_of_ordering = ["hash"]  # , "map"
     kinds_of_data = ["separated", "merged"]
     use_goals = [True, False]
+    USE_DEPTH = False
 
     MAX_SAMPLES_FOR_CLASS = 15000
     MAX_UNREACHABLE_SAMPLES_RATIO = 0.15
@@ -28,7 +32,9 @@ if __name__ == "__main__":
         for KIND_OF_DATA in kinds_of_data:
             for USE_GOAL in use_goals:
 
-                path_save_data = f"data/{DOMAIN}/{KIND_OF_ORDERING}_{KIND_OF_DATA}"
+                path_save_data = (
+                    f"{PATH_SAVE_DATA}/{DOMAIN}/{KIND_OF_ORDERING}_{KIND_OF_DATA}"
+                )
                 path_save_data += "_goal" if USE_GOAL else "_no_goal"
 
                 pipe = GraphDataPipeline(
@@ -39,6 +45,7 @@ if __name__ == "__main__":
                     max_unreachable_ratio=MAX_UNREACHABLE_SAMPLES_RATIO,
                     UNREACHABLE_STATE_VALUE=UNREACHABLE_STATE_VALUE,
                     use_goal=USE_GOAL,
+                    use_depth=USE_DEPTH,
                 )
 
                 saved_path = pipe.save(
@@ -48,7 +55,6 @@ if __name__ == "__main__":
                     },
                 )
 
-                # Later, to reload:
                 data_path = path_save_data + "/dataloader_info.pt"
                 data = torch.load(data_path, weights_only=False)
                 samples = data["samples"]
@@ -91,14 +97,14 @@ if __name__ == "__main__":
                     )
 
                     path_model = (
-                        f"trained_models/{DOMAIN}/"
+                        f"{PATH_SAVE_MODEL}/{DOMAIN}/"
                         + path_save_data.split("/")[-1]
                         + "/"
                         + model_name
                     )
 
                     # instantiate
-                    m = select_model(model_name, USE_GOAL)
+                    m = select_model(model_name, USE_GOAL, USE_DEPTH)
 
                     # train
                     m.train(
@@ -113,9 +119,17 @@ if __name__ == "__main__":
                     m.evaluate(val_loader)
                     # single inference
                     if USE_GOAL:
-                        out = m.predict_single("state.dot", 5, "goal_tree.dot")
+                        if USE_DEPTH:
+                            out = m.predict_single("state.dot", 5, "goal_tree.dot")
+                        else:
+                            out = m.predict_single(
+                                "state.dot", goal_dot="goal_tree.dot"
+                            )
                     else:
-                        out = m.predict_single("state.dot", 5)
+                        if USE_DEPTH:
+                            out = m.predict_single("state.dot", 5)
+                        else:
+                            out = m.predict_single("state.dot")
                     print("PyTorch output: ", out)
 
                     onnx_model_file = f"{path_model}/{model_name}.onnx"
@@ -125,7 +139,15 @@ if __name__ == "__main__":
                     ggg = ["goal_tree.dot", "goal_tree.dot"]
                     ddd = [5, 5]
                     if USE_GOAL:
-                        out_onnx = m.try_onnx(onnx_model_file, sss, ddd, ggg)
+                        if USE_DEPTH:
+                            out_onnx = m.try_onnx(onnx_model_file, sss, ddd, ggg)
+                        else:
+                            out_onnx = m.try_onnx(
+                                onnx_model_file, sss, goal_dot_files=ggg
+                            )
                     else:
-                        out_onnx = m.try_onnx(onnx_model_file, sss, ddd)
+                        if USE_DEPTH:
+                            out_onnx = m.try_onnx(onnx_model_file, sss, ddd)
+                        else:
+                            out_onnx = m.try_onnx(onnx_model_file, sss)
                     print("Out onnx: ", out_onnx)

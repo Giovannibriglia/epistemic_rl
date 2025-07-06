@@ -215,7 +215,7 @@ def _nx_to_pyg(G: nx.DiGraph, plot: bool = False, diagnose: bool = False) -> Dat
 
 def preprocess_sample(
     state_path: str,
-    depth: int,
+    depth: int | None = None,
     target: int | None = None,
     goal_path: Optional[str] = None,
     if_plot_graph: bool = False,
@@ -234,7 +234,10 @@ def preprocess_sample(
         diagnose_data(ds)
     ds.name = Path(state_path).stem
 
-    sample = {"state_graph": ds, "depth": torch.tensor([depth])}
+    sample = {"state_graph": ds}
+
+    if depth is not None:
+        sample["depth"] = torch.tensor([depth])
 
     if target is not None:
         sample["target"] = torch.tensor([target], dtype=torch.float)
@@ -269,7 +272,9 @@ def graph_collate_fn(batch):
             if "goal_graph" in batch[0]
             else None
         ),
-        "depth": torch.stack([b["depth"] for b in batch]),
+        "depth": (
+            torch.stack([b["depth"] for b in batch]) if "depth" in batch[0] else None
+        ),
     }
 
     if "target" in batch[0]:  # ← only in training / evaluation
@@ -354,7 +359,9 @@ class DistanceEstimatorModel(BaseModel):
             preds = self.model(batch)
         return preds.cpu()
 
-    def predict_single(self, state_dot: str, depth: int, goal_dot: str | None = None):
+    def predict_single(
+        self, state_dot: str, depth: int | None = None, goal_dot: str | None = None
+    ):
         """
         Wraps the preprocessing and returns a dict with:
           - predicted_distance: float
@@ -378,7 +385,7 @@ class DistanceEstimatorModel(BaseModel):
         self,
         onnx_path: str | Path,
         state_dot_files: Sequence[str | Path],
-        depths: Sequence[float | int],
+        depths: Sequence[float | int] = None,
         goal_dot_files: Optional[Sequence[str | Path]] = None,
     ) -> np.ndarray:
         """
@@ -452,15 +459,27 @@ def preprocess_for_onnx(
     state_edge_attr = torch.cat(s_attrs)  # [Es,1]
     state_batch = torch.cat(s_batch)  # [Ns]
 
-    depth = torch.as_tensor(depths, dtype=torch.float32)  # [B]
-
+    # ----- pack everything that is always present -----
     feed = {
         "state_node_names": state_node_names.numpy(),
         "state_edge_index": state_edge_index.numpy(),
         "state_edge_attr": state_edge_attr.numpy(),
         "state_batch": state_batch.numpy(),
-        "depth": depth.numpy(),
     }
+
+    # ----- depth is optional -------------------------------------------
+    if depths:
+        if len(depths) != len(state_dot_files):
+            raise ValueError(
+                f"len(depths)={len(depths)} must equal #graphs={len(state_dot_files)}"
+            )
+        depth_tensor = torch.as_tensor(depths, dtype=torch.float32)
+        feed["depth"] = depth_tensor.numpy()
+    else:
+        # Either leave it out (common when the downstream ONNX graph
+        # has an optional input) or put a default:
+        # feed["depth"] = np.zeros(len(state_dot_files), dtype=np.float32)
+        pass
 
     if goal_dot_files is not None:
         goal_node_names = torch.cat(g_nodes)  # [Ng]
@@ -565,7 +584,7 @@ class ReachabilityClassifierModel(BaseModel):
     def predict_single(
         self,
         state_dot: str,
-        depth: int,
+        depth: int | None = None,
         goal_dot: str | None = None,
         threshold: float = 0.5,
     ) -> dict:
@@ -588,7 +607,7 @@ class ReachabilityClassifierModel(BaseModel):
         self,
         onnx_path: str | Path,
         state_dot_files: Sequence[str | Path],
-        depths: Sequence[float | int],
+        depths: Sequence[float | int | None],
         goal_dot_files: Optional[Sequence[str | Path]] = None,
     ) -> np.ndarray:
         """
@@ -609,12 +628,15 @@ class ReachabilityClassifierModel(BaseModel):
         return reachability
 
 
-def select_model(model_name: str = "distance_estimator", use_goal: bool = True):
+def select_model(
+    model_name: str = "distance_estimator",
+    use_goal: bool = True,
+    use_depth: bool = True,
+):
 
     if model_name == "distance_estimator":
         model = DistanceEstimatorModel(
-            DistanceEstimator,
-            use_goal=use_goal,
+            DistanceEstimator, use_goal=use_goal, use_depth=use_depth
         )
         return model
 
