@@ -436,13 +436,21 @@ def preprocess_for_onnx(
 
     cum_state = 0
     cum_goal = 0
+    # print(state_dot_files)
     for g_idx, s_file in enumerate(state_dot_files):
         n_id, e_idx, e_attr = _parse_dot(Path(s_file))
         s_nodes.append(n_id)
         s_edges.append(e_idx + cum_state)  # offset
         s_attrs.append(e_attr)
         s_batch.append(torch.full((n_id.size(0),), g_idx, dtype=torch.int64))
+        """print("n_id: ", n_id)
+        print("e_idx: ", e_idx)
+        print("e_attr: ", e_attr)
+        print("g_idx: ", g_idx)
+        print(torch.full((n_id.size(0),), g_idx, dtype=torch.int64))"""
         cum_state += n_id.size(0)
+
+    # print(f"\n {s_batch}")
 
     if goal_dot_files is not None:
         for g_idx, g_file in enumerate(goal_dot_files):
