@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 
 import torch
 import torch.nn.functional as F
@@ -139,47 +139,35 @@ class DistanceEstimator(nn.Module):
 
 
 # ──────────────────────────────────────────────────────────────── ONNX wrapper
+
+
 class OnnxDistanceEstimatorWrapper(nn.Module):
     def __init__(self, core: "DistanceEstimator"):
         super().__init__()
         self.core = core
 
-    # ------------------------------ util
-    @staticmethod
-    def _global_mean(x, batch):
-        B = batch.max() + 1
-        sums = torch.zeros(B, x.size(1), dtype=x.dtype, device=x.device)
-        sums = sums.index_add(0, batch, x)
-        cnts = torch.zeros_like(sums[:, :1])
-        cnts = cnts.index_add(
-            0, batch, torch.ones_like(batch, dtype=x.dtype).unsqueeze(1)
-        )
-        return sums / cnts.clamp(min=1.0)
-
-    # ------------------------------ encoder
-    def _encode_raw(self, node_ids, edge_index, edge_attr, batch, conv1, conv2):
+    def _encode_raw(
+        self, node_ids, edge_index, edge_attr, batch, conv1: GINEConv, conv2: GINEConv
+    ):
         x = self.core.id_mlp(
-            torch.clamp((node_ids.float() + 2.0) / TWO_48_MINUS_1, 0.0, 1.0).unsqueeze(
-                1
-            )
+            torch.clamp(node_ids.float() / TWO_48_MINUS_1, 0.0, 1.0).unsqueeze(1)
         )
         e = self.core.edge_mlp(edge_attr.float())
         x = F.relu(conv1(x, edge_index, e))
         x = F.relu(conv2(x, edge_index, e))
         return self._global_mean(x, batch)
 
-    # ------------------------------ forward
     def forward(
         self,
         s_node_ids,
         s_edge_index,
         s_edge_attr,
         s_batch,
-        depth,
-        g_node_ids,
-        g_edge_index,
-        g_edge_attr,
-        g_batch,
+        depth: Optional[torch.Tensor] = None,
+        g_node_ids: Optional[torch.Tensor] = None,
+        g_edge_index: Optional[torch.Tensor] = None,
+        g_edge_attr: Optional[torch.Tensor] = None,
+        g_batch: Optional[torch.Tensor] = None,
     ):
         s_emb = self._encode_raw(
             s_node_ids,
@@ -190,7 +178,7 @@ class OnnxDistanceEstimatorWrapper(nn.Module):
             self.core.state_conv2,
         )
 
-        if self.core.use_goal and g_node_ids.numel() > 0:
+        if self.core.use_goal and g_node_ids is not None and g_node_ids.numel() > 0:
             g_emb = self._encode_raw(
                 g_node_ids,
                 g_edge_index,
@@ -203,14 +191,38 @@ class OnnxDistanceEstimatorWrapper(nn.Module):
         else:
             rep = s_emb
 
-        # depth handling identical to core
         if self.core.use_depth:
             if depth is None or depth.numel() == 0:
-                depth = torch.zeros(len(rep), 1, dtype=rep.dtype, device=rep.device)
+                depth = torch.zeros(rep.size(0), 1, dtype=rep.dtype, device=rep.device)
             else:
                 depth = depth.float().view(-1, 1)
-            z = torch.cat([rep, depth], dim=1)
-        else:
-            z = rep
+            rep = torch.cat([rep, depth], dim=1)
 
-        return self.core.regressor(z).squeeze(1)
+        return self.core.regressor(rep).squeeze(1)
+
+    @staticmethod
+    def _global_mean(x: torch.Tensor, batch: torch.Tensor) -> torch.Tensor:
+        """
+        ONNX-friendly mean-pool:  scatter-reduce for sum, then divide by count.
+        Works with dynamic batch sizes & graph sizes.
+        """
+        # 1. Sum features per graph  ---------------------------
+        idx = batch.unsqueeze(-1).expand_as(x)  # [V, C]
+        sums = torch.scatter_reduce(
+            torch.zeros(batch.max() + 1, x.size(1), dtype=x.dtype, device=x.device),
+            0,
+            idx,
+            x,
+            reduce="sum",  # default include_self=True
+        )
+
+        # 2. Count nodes per graph  ---------------------------
+        cnts = torch.scatter_reduce(
+            torch.zeros_like(sums[:, :1]),
+            0,
+            batch.unsqueeze(-1),
+            torch.ones_like(x[:, :1]),
+            reduce="sum",  # default include_self=True
+        )
+
+        return sums / cnts.clamp(min=1.0)

@@ -185,7 +185,9 @@ class BaseModel(ABC):
 
         return history
 
-    def to_onnx(self, onnx_path: str | Path, use_goal: bool = True) -> None:
+    def to_onnx(
+        self, onnx_path: str | Path, use_goal: bool = False, use_depth: bool = False
+    ) -> None:
         """
         Export the *trained* DistanceEstimator to ONNX with **dynamic** sizes:
 
@@ -198,7 +200,6 @@ class BaseModel(ABC):
         onnx_wrapper = self._get_onnx_wrapper()
 
         onnx_path = Path(onnx_path)
-        self.model.eval()
 
         # dummy – just to trace the graph; real sizes don’t matter
         N_s, E_s = 3, 4  # state  graph:  3 nodes – 4 edges
@@ -217,8 +218,10 @@ class BaseModel(ABC):
             torch.tensor([0, 0, 1], dtype=torch.int64),  # goal_batch
         )
 
+        wrapper = onnx_wrapper(self.model).eval()
+
         torch.onnx.export(
-            onnx_wrapper(self.model).cpu(),  # << wrapped core
+            wrapper.cpu(),  # << wrapped core
             dummy_inputs,
             onnx_path.as_posix(),
             opset_version=18,  # ScatterND w/ reduction

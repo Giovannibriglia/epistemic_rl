@@ -116,8 +116,8 @@ _NEG_ID_RE = re.compile(r'(?<![\w"])-\d+(?![\w"])')
 
 def _load_dot(path: Path, quote_neg: bool) -> nx.DiGraph:
     src = path.read_text()
-    if quote_neg:
-        src = _NEG_ID_RE.sub(lambda m: f'"{m.group(0)}"', src)
+    """if quote_neg:
+        src = _NEG_ID_RE.sub(lambda m: f'"{m.group(0)}"', src)"""
     dot = pydot.graph_from_dot_data(src)[0]
     return nx.nx_pydot.from_pydot(dot)
 
