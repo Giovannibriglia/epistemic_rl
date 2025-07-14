@@ -17,14 +17,14 @@ class BaseModel(ABC):
         self,
         model: torch.nn.Module,
         device: torch.device | str = None,
-        optimizer_cls: type = torch.optim.Adam,
+        optimizer_cls: type = torch.optim.AdamW,
         optimizer_kwargs: dict = None,
     ):
         """
         Args:
             model: your nn.Module
             device: 'cuda' / 'cpu' or torch.device.  If None, auto‐selects.
-            optimizer_cls: optimizer class (default Adam)
+            optimizer_cls: optimizer class (default AdamW)
             optimizer_kwargs: dict of kwargs to pass to optimizer (e.g. {'lr':1e-3})
         """
         self.device = (
@@ -93,6 +93,8 @@ class BaseModel(ABC):
             for name, value in val_metrics.items():
                 history[name].append(value)
 
+            history["train_loss"].append(avg_loss)
+
         self.save_and_plot_metrics(history, checkpoint_dir, n_epochs)
 
     def _move_batch_to_device(self, batch: dict) -> dict:
@@ -116,6 +118,7 @@ class BaseModel(ABC):
     def evaluate(
         self,
         loader: torch.utils.data.DataLoader,
+        verbose: bool = False,
         **kwargs,
     ) -> dict:
         """
@@ -198,59 +201,78 @@ class BaseModel(ABC):
         inference in ONNX Runtime.
         """
         onnx_wrapper = self._get_onnx_wrapper()
-
         onnx_path = Path(onnx_path)
 
         # dummy – just to trace the graph; real sizes don’t matter
-        N_s, E_s = 3, 4  # state  graph:  3 nodes – 4 edges
-        N_g, E_g = 3, 4  # goal   graph:  3 nodes – 4 edges
-        B = 2  # two graphs in the mini-batch
+        N_s, E_s = 3, 4  # state graph: 3 nodes – 4 edges
+        N_g, E_g = 3, 4  # goal  graph: 3 nodes – 4 edges
+        B = 5  # batch size
 
-        dummy_inputs = (
+        # Base inputs (state graph)
+        input_names = [
+            "state_node_names",
+            "state_edge_index",
+            "state_edge_attr",
+            "state_batch",
+        ]
+        dummy_inputs = [
             torch.arange(N_s, dtype=torch.float32),  # state_node_names
             torch.zeros((2, E_s), dtype=torch.int64),  # state_edge_index
             torch.zeros((E_s, 1), dtype=torch.float32),  # state_edge_attr
             torch.tensor([0, 0, 1], dtype=torch.int64),  # state_batch
-            torch.zeros(B, dtype=torch.float32),  # depth  (B × 1)
-            torch.arange(N_g, dtype=torch.float32),  # goal_node_names
-            torch.zeros((2, E_g), dtype=torch.int64),  # goal_edge_index
-            torch.zeros((E_g, 1), dtype=torch.float32),  # goal_edge_attr
-            torch.tensor([0, 0, 1], dtype=torch.int64),  # goal_batch
-        )
+        ]
 
+        dynamic_axes = {
+            "state_node_names": {0: "Ns"},
+            "state_edge_index": {1: "Es"},
+            "state_edge_attr": {0: "Es"},
+            "state_batch": {0: "Ns"},
+        }
+
+        # ─── placeholder for depth (aligns with wrapper.forward signature) ───
+        dummy_inputs.append(torch.zeros(B, dtype=torch.float32))  # depth
+        input_names.insert(4, "depth")  # insert after state_batch
+        dynamic_axes["depth"] = {0: "B"}
+
+        # ─── goal graph inputs (optional) ───
+        if use_goal:
+            dummy_inputs.append(
+                torch.arange(N_g, dtype=torch.float32)
+            )  # goal_node_names
+            input_names.append("goal_node_names")
+            dynamic_axes["goal_node_names"] = {0: "Ng"}
+
+            dummy_inputs.append(
+                torch.zeros((2, E_g), dtype=torch.int64)
+            )  # goal_edge_index
+            input_names.append("goal_edge_index")
+            dynamic_axes["goal_edge_index"] = {1: "Eg"}
+
+            dummy_inputs.append(
+                torch.zeros((E_g, 1), dtype=torch.float32)
+            )  # goal_edge_attr
+            input_names.append("goal_edge_attr")
+            dynamic_axes["goal_edge_attr"] = {0: "Eg"}
+
+            dummy_inputs.append(
+                torch.tensor([0, 0, 1], dtype=torch.int64)
+            )  # goal_batch
+            input_names.append("goal_batch")
+            dynamic_axes["goal_batch"] = {0: "Ng"}
+
+        dynamic_axes["distance"] = {0: "B"}
+
+        # build and export
         wrapper = onnx_wrapper(self.model).eval()
-
         torch.onnx.export(
-            wrapper.cpu(),  # << wrapped core
-            dummy_inputs,
+            wrapper.cpu(),
+            tuple(dummy_inputs),
             onnx_path.as_posix(),
-            opset_version=18,  # ScatterND w/ reduction
-            input_names=[
-                "state_node_names",
-                "state_edge_index",
-                "state_edge_attr",
-                "state_batch",
-                "depth",
-                "goal_node_names",
-                "goal_edge_index",
-                "goal_edge_attr",
-                "goal_batch",
-            ],
+            opset_version=18,
+            input_names=input_names,
             output_names=["distance"],
-            dynamic_axes={  # ← make everything var-len
-                "state_node_names": {0: "Ns"},
-                "state_edge_index": {1: "Es"},
-                "state_edge_attr": {0: "Es"},
-                "state_batch": {0: "Ns"},
-                "depth": {0: "B"},  # B = batch size
-                "goal_node_names": {0: "Ng"},
-                "goal_edge_index": {1: "Eg"},
-                "goal_edge_attr": {0: "Eg"},
-                "goal_batch": {0: "Ng"},
-                "distance": {0: "B"},
-            },
+            dynamic_axes=dynamic_axes,
         )
-        print("ONNX export complete ✅")
 
     @abstractmethod
     def _get_onnx_wrapper(self):

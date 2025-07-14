@@ -29,7 +29,7 @@ from torch_geometric.data import Batch, Data
 from torch_geometric.utils import from_networkx
 
 from src.model import BaseModel
-from src.models.distance_estimator import (
+from src.models.distance_estimator2 import (
     DistanceEstimator,
     OnnxDistanceEstimatorWrapper,
 )
@@ -302,7 +302,9 @@ class DistanceEstimatorModel(BaseModel):
         targets = batch["target"].view(-1)  # [B]
         return self.criterion(preds, targets)
 
-    def evaluate(self, loader: torch.utils.data.DataLoader, **kwargs) -> dict:
+    def evaluate(
+        self, loader: torch.utils.data.DataLoader, verbose: bool = False, **kwargs
+    ) -> dict:
         """
         Basic regression evaluation over all samples.
         Returns:
@@ -324,14 +326,18 @@ class DistanceEstimatorModel(BaseModel):
                 all_preds.extend(preds)
                 all_targets.extend(targets)
 
-        # now compute metrics via sklearn
+                if verbose:
+                    for i, pred in enumerate(preds):
+                        if not (pred - 0.1 < targets[i] < pred + 0.1):
+                            print(f"{i}) pred:{pred} | target:{targets[i]}")
+
         mse = mean_squared_error(all_targets, all_preds)
         rmse = math.sqrt(mse)
         mae = mean_absolute_error(all_targets, all_preds)
         r2 = r2_score(all_targets, all_preds)
 
         return {
-            "val_loss": mse,  # MSE as the main loss
+            "val_loss": 1 - r2,
             "mse": mse,
             "rmse": rmse,
             "mae": mae,
@@ -408,7 +414,7 @@ class DistanceEstimatorModel(BaseModel):
 
 def preprocess_for_onnx(
     state_dot_files: Sequence[str | Path],
-    depths: Sequence[float | int],
+    depths: Sequence[float | int] = None,
     goal_dot_files: Optional[Sequence[str | Path]] = None,
 ):
     def _parse_dot(path: Path) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -476,7 +482,7 @@ def preprocess_for_onnx(
     }
 
     # ----- depth is optional -------------------------------------------
-    if depths:
+    if depths is not None:
         if len(depths) != len(state_dot_files):
             raise ValueError(
                 f"len(depths)={len(depths)} must equal #graphs={len(state_dot_files)}"

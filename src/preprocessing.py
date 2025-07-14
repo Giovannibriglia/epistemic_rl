@@ -105,7 +105,6 @@ class GraphDataPipeline:
             if not csv:
                 continue
             df = self._read_csv(csv)
-            print(df.value_counts(df["Distance From Goal"]))
 
             df["Distance From Goal"] = df["Distance From Goal"].replace(
                 self.GOAL_DISTANCE_TO_REPLACE,
@@ -114,8 +113,6 @@ class GraphDataPipeline:
             df = self._balance_dataset(df)
             frames.append(df)
         self.df = pd.concat(frames, ignore_index=True)
-
-        print(self.df.value_counts(self.df["Distance From Goal"]))
 
         return self.df
 
