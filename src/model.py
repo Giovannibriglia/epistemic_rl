@@ -229,11 +229,6 @@ class BaseModel(ABC):
             "state_batch": {0: "Ns"},
         }
 
-        # ─── placeholder for depth (aligns with wrapper.forward signature) ───
-        dummy_inputs.append(torch.zeros(B, dtype=torch.float32))  # depth
-        input_names.insert(4, "depth")  # insert after state_batch
-        dynamic_axes["depth"] = {0: "B"}
-
         # ─── goal graph inputs (optional) ───
         if use_goal:
             dummy_inputs.append(
@@ -260,7 +255,13 @@ class BaseModel(ABC):
             input_names.append("goal_batch")
             dynamic_axes["goal_batch"] = {0: "Ng"}
 
-        dynamic_axes["distance"] = {0: "B"}
+        # ─── placeholder for depth (aligns with wrapper.forward signature) ───
+        if use_depth:
+            dummy_inputs.append(torch.zeros(B, dtype=torch.float32))  # depth
+            input_names.insert(4, "depth")  # insert after state_batch
+            dynamic_axes["depth"] = {0: "B"}
+
+        dynamic_axes["distance"] = {0: "B"}  # "B"
 
         # build and export
         wrapper = onnx_wrapper(self.model).eval()
@@ -272,6 +273,8 @@ class BaseModel(ABC):
             input_names=input_names,
             output_names=["distance"],
             dynamic_axes=dynamic_axes,
+            do_constant_folding=False,
+            # verbose=True,
         )
 
     @abstractmethod

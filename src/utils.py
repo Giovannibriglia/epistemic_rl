@@ -11,17 +11,9 @@ import networkx as nx
 import numpy as np
 import pydot
 import torch
-import torch.nn.functional as F
+
 from matplotlib import pyplot as plt
-from sklearn.metrics import (
-    accuracy_score,
-    f1_score,
-    mean_absolute_error,
-    mean_squared_error,
-    precision_score,
-    r2_score,
-    recall_score,
-)
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
@@ -32,10 +24,6 @@ from src.model import BaseModel
 from src.models.distance_estimator2 import (
     DistanceEstimator,
     OnnxDistanceEstimatorWrapper,
-)
-from src.models.reachability_classifier import (
-    OnnxReachabilityClassifierWrapper,
-    ReachabilityClassifier,
 )
 
 
@@ -408,7 +396,7 @@ class DistanceEstimatorModel(BaseModel):
         feed = preprocess_for_onnx(state_dot_files, depths, goal_dot_files)
         # inference ------- --------------------------------------------------------
         ort_sess = ort.InferenceSession(str(onnx_path))
-        distance = ort_sess.run(None, feed)[0]  # → np.ndarray  shape [B]
+        distance = ort_sess.run(["distance"], feed)[0]  # → np.ndarray  shape [B]
         return distance
 
 
@@ -473,6 +461,11 @@ def preprocess_for_onnx(
     state_edge_attr = torch.cat(s_attrs)  # [Es,1]
     state_batch = torch.cat(s_batch)  # [Ns]
 
+    """print(f"state_node_names: ", state_node_names.shape)
+    print(f"state_edge_index: ", state_edge_index.shape)
+    print(f"state_edge_attr: ", state_edge_attr.shape)
+    print(f"state_batch: ", state_batch.shape)"""
+
     # ----- pack everything that is always present -----
     feed = {
         "state_node_names": state_node_names.numpy(),
@@ -509,139 +502,6 @@ def preprocess_for_onnx(
     return feed
 
 
-class ReachabilityClassifierModel(BaseModel):
-    def __init__(
-        self,
-        classifier_cls,  # ← a class, e.g. DistanceEstimator or ReachabilityClassifier
-        *estimator_args,
-        **estimator_kwargs,
-    ):
-        # instantiate whatever class you passed in:
-        self.classifier_cls = classifier_cls(*estimator_args, **estimator_kwargs)
-        # now call your base initializer
-        super().__init__(model=self.classifier_cls, optimizer_kwargs={"lr": 1e-3})
-        self.criterion = nn.BCEWithLogitsLoss(reduction="mean")
-
-    def _compute_loss(self, batch):
-        logits = self.model(batch).view(-1)
-        targets = batch["target"].view(-1).float()  # assume 0/1
-        return self.criterion(logits, targets)
-
-    def evaluate(self, loader: torch.utils.data.DataLoader, **kwargs) -> dict:
-        """
-        Evaluate a binary reachability classifier.
-        Assumes batch["target"] is already 0/1 (float or long).
-        Returns:
-          - val_loss: average BCE loss over all samples
-          - accuracy, precision, recall, f1: classification metrics
-        """
-        self.model.eval()
-        loss_accum = 0.0
-        n = 0
-        all_preds = []
-        all_targets = []
-
-        with torch.no_grad():
-            for batch in loader:
-                batch = self._move_batch_to_device(batch)
-                logits = self.model(batch).view(-1)  # raw scores
-                targets = batch["target"].view(-1).float()  # 0.0 or 1.0
-
-                # sum‐reduction BCE
-                loss_accum += F.binary_cross_entropy_with_logits(
-                    logits, targets, reduction="sum"
-                ).item()
-                n += targets.size(0)
-
-                # compute predictions
-                probs = torch.sigmoid(logits)
-                preds = (probs >= 0.5).long()
-
-                all_preds.extend(preds.cpu().tolist())
-                all_targets.extend(targets.cpu().long().tolist())
-
-        val_loss = loss_accum / n if n > 0 else float("nan")
-        accuracy = accuracy_score(all_targets, all_preds)
-        precision = precision_score(all_targets, all_preds, zero_division=0)
-        recall = recall_score(all_targets, all_preds, zero_division=0)
-        f1 = f1_score(all_targets, all_preds, zero_division=0)
-
-        return {
-            "val_loss": val_loss,
-            "accuracy": accuracy,
-            "precision": precision,
-            "recall": recall,
-            "f1": f1,
-        }
-
-    def _save_full_checkpoint(self, path, **metrics):
-        """
-        Save model + config + metrics into one file.
-        """
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        ckpt = self.model.get_checkpoint()
-        ckpt["metrics"] = metrics
-        torch.save(ckpt, path)
-
-    def load_model(self, path_ckpt):
-        ckpt = torch.load(path_ckpt, map_location=self.device)
-        self.model = self.classifier_cls.load_model(ckpt)
-        self.model.to(self.device)
-
-    def predict_batch(self, batch: dict) -> torch.Tensor:
-        self.model.eval()
-        batch = self._move_batch_to_device(batch)
-        with torch.no_grad():
-            logits = self.model(batch).view(-1)
-            return torch.sigmoid(logits).cpu()  # returns probabilities
-
-    def predict_single(
-        self,
-        state_dot: str,
-        depth: int | None = None,
-        goal_dot: str | None = None,
-        threshold: float = 0.5,
-    ) -> dict:
-        """
-        Preprocess one sample and return:
-          - prob_reachable: float
-          - reachable: bool
-        """
-        sample = preprocess_sample(
-            state_path=state_dot, depth=depth, target=None, goal_path=goal_dot
-        )
-        batch = graph_collate_fn([sample])
-        prob = self.predict_batch(batch).item()
-        return {"prob_reachable": prob, "reachable": prob >= threshold}
-
-    def _get_onnx_wrapper(self):
-        return OnnxReachabilityClassifierWrapper
-
-    def try_onnx(
-        self,
-        onnx_path: str | Path,
-        state_dot_files: Sequence[str | Path],
-        depths: Sequence[float | int | None],
-        goal_dot_files: Optional[Sequence[str | Path]] = None,
-    ) -> np.ndarray:
-        """
-        Run a **batch** of (state, goal, depth) samples through ONNX Runtime.
-
-        Parameters
-        ----------
-        state_dot_files : list[str]   – DOT files of *state* graphs
-        depths          : list[int]   – raw depth values (same length as batch)
-        goal_dot_files  : list[str] | None – optional DOT files of *goal* graphs
-        """
-        import onnxruntime as ort
-
-        feed = preprocess_for_onnx(state_dot_files, depths, goal_dot_files)
-        # inference ------- --------------------------------------------------------
-        ort_sess = ort.InferenceSession(str(onnx_path))
-        reachability = ort_sess.run(None, feed)[0]  # → np.ndarray  shape [B]
-        return reachability
-
-
 def select_model(
     model_name: str = "distance_estimator",
     use_goal: bool = True,
@@ -651,13 +511,6 @@ def select_model(
     if model_name == "distance_estimator":
         model = DistanceEstimatorModel(
             DistanceEstimator, use_goal=use_goal, use_depth=use_depth
-        )
-        return model
-
-    elif model_name == "reachability_classifier":
-        model = ReachabilityClassifierModel(
-            ReachabilityClassifier,
-            use_goal=use_goal,
         )
         return model
 

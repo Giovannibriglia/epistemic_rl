@@ -182,11 +182,11 @@ class OnnxDistanceEstimatorWrapper(nn.Module):
         s_edge_index,
         s_edge_attr,
         s_batch,
-        depth: Optional[torch.Tensor] = None,
         g_node_ids: Optional[torch.Tensor] = None,
         g_edge_index: Optional[torch.Tensor] = None,
         g_edge_attr: Optional[torch.Tensor] = None,
         g_batch: Optional[torch.Tensor] = None,
+        depth: Optional[torch.Tensor] = None,
     ):
         rep = self._encode_raw(
             s_node_ids,
