@@ -24,41 +24,41 @@ def print_values(samples):
     print(z)
 
 
-def prepare_samples(t_s_copy: List[Dict], t_t_copy: List[Dict], max_p: float):
-    t_s_copy = [s for s in t_s_copy if s["target"].item() != UNREACHABLE_STATE_VALUE]
-    t_t_copy = [s for s in t_t_copy if s["target"].item() != UNREACHABLE_STATE_VALUE]
+def f(value, slope, min_value_nn, if_forward: bool = True):
+    if if_forward:
+        return value * slope + min_value_nn
+    else:
+        return value / slope - min_value_nn
 
-    max_train = -1
-    for s in t_s_copy:
-        v = s["target"].item()
-        if v > max_train and v != UNREACHABLE_STATE_VALUE:
-            max_train = v
 
-    max_test = -1
-    for s in t_t_copy:
-        v = s["target"].item()
-        if v > max_test and v != UNREACHABLE_STATE_VALUE:
-            max_test = v
+def prepare_samples(t_s_copy: List[Dict], t_t_copy: List[Dict]):
 
-    max_all = 2 * max(max_train, max_test)
+    MIN_DEPTH = 0
+    MAX_DEPTH = 50
 
-    C = max_p / max_all
-    print("C = ", C)
+    MIN_V_NN = 1e-5
+    MAX_V_NN = 1 - MIN_V_NN
+
+    slope = (MAX_V_NN - MIN_V_NN) / (MAX_DEPTH - MIN_DEPTH)
+
+    params = {"slope": slope, "min_value_nn": MIN_V_NN}
+
+    print("params: ", params)
     for s in t_s_copy:
         v = s["target"].item()
         if v != UNREACHABLE_STATE_VALUE:
-            s["target"] *= C
+            s["target"] = torch.tensor(f(v, slope, MIN_V_NN), dtype=torch.float)
         else:
-            s["target"] = torch.tensor([0.99], dtype=torch.float32)
+            s["target"] = torch.tensor(f(50, slope, MIN_V_NN), dtype=torch.float)
 
     for s in t_t_copy:
         v = s["target"].item()
         if v != UNREACHABLE_STATE_VALUE:
-            s["target"] *= C
+            s["target"] = torch.tensor(f(v, slope, MIN_V_NN), dtype=torch.float)
         else:
-            s["target"] = torch.tensor([0.99], dtype=torch.float32)
+            s["target"] = torch.tensor(f(50, slope, MIN_V_NN), dtype=torch.float)
 
-    return t_s_copy, t_t_copy, C, max_all
+    return t_s_copy, t_t_copy, params
 
 
 if __name__ == "__main__":
@@ -70,13 +70,14 @@ if __name__ == "__main__":
 
     FOLDER_DATA = f"out/NN/Training_{DOMAIN}"
     UNREACHABLE_STATE_VALUE = 1000000
+    TEST_SIZE = 0.2
 
     MODELS = [
         "distance_estimator",
     ]
 
-    PATH_SAVE_DATA = "data_ok_new"
-    PATH_SAVE_MODEL = "trained_models_ok_new_no_unreachable"
+    PATH_SAVE_DATA = "data2"
+    PATH_SAVE_MODEL = "trained_models2"
 
     kinds_of_ordering = ["hash"]  # , "map"
     kinds_of_data = ["merged"]  # "separated",
@@ -85,10 +86,6 @@ if __name__ == "__main__":
 
     N_TRAIN_EPOCHS = 500
     BATCH_SIZE = 2048
-    MAX_UNREACHABLE_SAMPLES_RATIO = 0.1
-    TEST_SIZE = 0.2
-
-    MAX_PERCENTAGE_REACHABLE_STATES = 0.7
 
     for KIND_OF_ORDERING in kinds_of_ordering:
         for KIND_OF_DATA in kinds_of_data:
@@ -107,7 +104,6 @@ if __name__ == "__main__":
                             kind_of_ordering=KIND_OF_ORDERING,
                             kind_of_data=KIND_OF_DATA,
                             unreachable_state_value=UNREACHABLE_STATE_VALUE,
-                            max_unreachable_samples_ratio=MAX_UNREACHABLE_SAMPLES_RATIO,
                             test_size=TEST_SIZE,
                             use_goal=USE_GOAL,
                             use_depth=USE_DEPTH,
@@ -115,9 +111,7 @@ if __name__ == "__main__":
 
                         saved_path = pipe.save(
                             out_dir=path_save_data,
-                            extra_params={
-                                "max_unreachable_ratio": MAX_UNREACHABLE_SAMPLES_RATIO,
-                            },
+                            extra_params={},
                         )
 
                     data_path = path_save_data + "/samples.pt"
@@ -132,16 +126,16 @@ if __name__ == "__main__":
                         train_samples_copy = train_samples.copy()
                         test_samples_copy = test_samples.copy()
 
-                        train_samples_copy, test_samples_copy, C, max_all = (
+                        train_samples_copy, test_samples_copy, params_f = (
                             prepare_samples(
                                 train_samples_copy,
                                 test_samples_copy,
-                                MAX_PERCENTAGE_REACHABLE_STATES,
                             )
                         )
 
+                        print("Train values:")
                         print_values(train_samples_copy)
-                        print("\n")
+                        print("Test values:")
                         print_values(test_samples_copy)
 
                         train_loader, val_loader = get_dataloaders(
@@ -171,13 +165,11 @@ if __name__ == "__main__":
                         # load
                         m.load_model(f"{path_model}/best.pt")
 
-                        with open(f"{path_model}/C.txt", "w", encoding="utf-8") as f:
-                            f.write(f"C = {C}\n")
-                            f.write(
-                                f"max percentage seen reachable distances = {MAX_PERCENTAGE_REACHABLE_STATES}\n"
-                            )
-                            f.write(f"max depth = {max_all}\n")
-                        kwargs = {"C": C / 2}
+                        with open(f"{path_model}/C.txt", "w", encoding="utf-8") as fh:
+                            for key, value in params_f.items():
+                                fh.write(f"{key} = {value}\n")
+
+                        kwargs = {"C": params_f["slope"] / 2}
 
                         m.evaluate(val_loader, verbose=True, **kwargs)
                         # single inference

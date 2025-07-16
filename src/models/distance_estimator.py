@@ -42,10 +42,12 @@ class DistanceEstimator(nn.Module):
         regressor_hidden_dim: int = 128,
         regressor_blocks: int = 3,
         regressor_dropout: float = 0.2,
+        min_value: float = 1e-5,
     ):
         super().__init__()
         self.use_goal = use_goal
         self.use_depth = use_depth
+        self.min_value = min_value
 
         # ─────────────────────────────────── node & edge embeddings
         self.id_mlp = nn.Sequential(
@@ -133,7 +135,9 @@ class DistanceEstimator(nn.Module):
                 d = d.float().view(-1, 1)
             rep = torch.cat([rep, d], dim=1)
 
-        return self.regressor(rep).squeeze(1)
+        out = self.regressor(rep).squeeze(1)
+        out = out.clamp(min=self.min_value, max=1 - self.min_value)
+        return out
 
     def get_checkpoint(self) -> Dict:
         cfg = {
@@ -215,7 +219,9 @@ class OnnxDistanceEstimatorWrapper(nn.Module):
             )
             rep = torch.cat([rep, g_emb], dim=1)
 
-        return self.core.regressor(rep).squeeze(1)
+        out = self.regressor(rep).squeeze(1)
+        out = out.clamp(min=self.min_value, max=1 - self.min_value)
+        return out
 
     @staticmethod
     def _global_mean(x: torch.Tensor, batch: torch.Tensor) -> torch.Tensor:

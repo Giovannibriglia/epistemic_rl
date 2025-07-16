@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import torch
@@ -29,8 +29,7 @@ class GraphDataPipeline:
         kind_of_ordering: str,
         kind_of_data: str,
         unreachable_state_value: int,
-        max_unreachable_samples_ratio: float = 0.1,
-        max_percentage_per_class: float = 0.15,
+        max_percentage_per_class: float = 0.1,
         test_size: float = 0.2,
         use_goal: bool = True,
         use_depth: bool = True,
@@ -39,7 +38,6 @@ class GraphDataPipeline:
         self.folder_data = Path(folder_data)
         self.ordering = kind_of_ordering
         self.data_kind = kind_of_data
-        self.max_unreachable_samples_ratio = max_unreachable_samples_ratio
         self.test_size = test_size
         self.use_goal = use_goal
         self.use_depth = use_depth
@@ -79,9 +77,7 @@ class GraphDataPipeline:
         return df
 
     def _my_train_test_split(
-        self,
-        df: pd.DataFrame,
-        stratify_col: str,
+        self, df: pd.DataFrame, stratify_col: str = "Distance From Goal"
     ):
         """
         Splits df into train and test so that:
@@ -121,7 +117,9 @@ class GraphDataPipeline:
 
         return train, test
 
-    def _balance_target_feature(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _balance_dataset(
+        self, df: pd.DataFrame, feature: str = "Distance From Goal"
+    ) -> pd.DataFrame:
         """
         Undersample each class in 'Distance From Goal' so that no class exceeds
         self.max_percentage_per_class * len(df) samples.
@@ -132,7 +130,7 @@ class GraphDataPipeline:
 
         balanced_splits = []
         # Group by target value
-        for value, group in df.groupby("Distance From Goal"):
+        for value, group in df.groupby(feature):
             count = len(group)
             if count > max_samples_per_class:
                 # Randomly sample max_samples_per_class from this class
@@ -150,33 +148,6 @@ class GraphDataPipeline:
         balanced_df = balanced_df.reset_index(drop=True)
         return balanced_df
 
-    def _balance_dataset(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
-
-        reachable = df[df["Distance From Goal"] < self.unreachable_state_value]
-        unreachable = df[df["Distance From Goal"] >= self.unreachable_state_value]
-
-        mask = unreachable["Distance From Goal"] > self.unreachable_state_value
-        unreachable.loc[mask, "Distance From Goal"] = self.unreachable_state_value
-
-        len_unreachable_states_df = len(unreachable)
-        len_reachable_states_df = len(reachable)
-
-        if (
-            self.max_unreachable_samples_ratio * len_reachable_states_df
-            < len_unreachable_states_df
-        ):
-            N = int(self.max_unreachable_samples_ratio * len_reachable_states_df)
-        else:
-            N = len_unreachable_states_df
-
-        sampled_unreachable = unreachable.sample(n=N, random_state=self.random_state)
-
-        new_df = pd.concat([reachable, sampled_unreachable], ignore_index=True)
-
-        new_df = self._balance_target_feature(new_df)
-
-        return self._my_train_test_split(new_df, stratify_col="Distance From Goal")
-
     def _build_df(self):
         train_frames, test_frames = [], []
         for prob_dir in self._get_all_items(self.folder_data):
@@ -186,12 +157,14 @@ class GraphDataPipeline:
             if not csv:
                 continue
             df = self._read_csv(csv)
-
-            train_df, test_df = self._balance_dataset(df)
+            df = self._balance_dataset(df)
+            train_df, test_df = self._my_train_test_split(df)
             train_frames.append(train_df)
             test_frames.append(test_df)
         self.train_df = pd.concat(train_frames, ignore_index=True)
+        self.train_df = self._balance_dataset(self.train_df)
         self.test_df = pd.concat(test_frames, ignore_index=True)
+        self.test_df = self._balance_dataset(self.test_df)
 
     def _load_samples(self):
 
@@ -232,9 +205,3 @@ class GraphDataPipeline:
         }
         torch.save(payload, out / "samples.pt")
         return out / "samples.pt"
-
-    def get_df(self):
-        return self.df
-
-    def get_samples(self):
-        return self.samples
