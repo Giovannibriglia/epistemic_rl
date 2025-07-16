@@ -20,8 +20,7 @@ def print_values(samples):
     for target in sorted(d):
         x += f"| Target {target}: {d[target]}"
         z += d[target]
-    print(x)
-    print(z)
+    print(x, " -- Total samples: ", z)
 
 
 def f(value, slope, min_value_nn, if_forward: bool = True):
@@ -33,10 +32,26 @@ def f(value, slope, min_value_nn, if_forward: bool = True):
 
 def prepare_samples(t_s_copy: List[Dict], t_t_copy: List[Dict]):
 
-    MIN_DEPTH = 0
-    MAX_DEPTH = 50
+    t_s_copy = [s for s in t_s_copy if s["target"].item() != UNREACHABLE_STATE_VALUE]
+    t_t_copy = [s for s in t_t_copy if s["target"].item() != UNREACHABLE_STATE_VALUE]
 
-    MIN_V_NN = 1e-5
+    """def find_max(sss):
+        max_v = -1
+        for s in sss:
+            v = s["target"].item()
+            if v > max_v and v != UNREACHABLE_STATE_VALUE:
+                max_v = v
+        return max_v
+
+    max_train = find_max(t_s_copy)
+    max_test = find_max(t_t_copy)
+
+    max_tot = max(max_train, max_test)"""
+
+    MIN_DEPTH = 0
+    MAX_DEPTH = 50  # if max_tot * 2 > 50 else max_tot * 2
+
+    MIN_V_NN = 1e-3
     MAX_V_NN = 1 - MIN_V_NN
 
     slope = (MAX_V_NN - MIN_V_NN) / (MAX_DEPTH - MIN_DEPTH)
@@ -49,14 +64,14 @@ def prepare_samples(t_s_copy: List[Dict], t_t_copy: List[Dict]):
         if v != UNREACHABLE_STATE_VALUE:
             s["target"] = torch.tensor(f(v, slope, MIN_V_NN), dtype=torch.float)
         else:
-            s["target"] = torch.tensor(f(50, slope, MIN_V_NN), dtype=torch.float)
+            s["target"] = torch.tensor(f(MAX_DEPTH, slope, MIN_V_NN), dtype=torch.float)
 
     for s in t_t_copy:
         v = s["target"].item()
         if v != UNREACHABLE_STATE_VALUE:
             s["target"] = torch.tensor(f(v, slope, MIN_V_NN), dtype=torch.float)
         else:
-            s["target"] = torch.tensor(f(50, slope, MIN_V_NN), dtype=torch.float)
+            s["target"] = torch.tensor(f(MAX_DEPTH, slope, MIN_V_NN), dtype=torch.float)
 
     return t_s_copy, t_t_copy, params
 
@@ -76,8 +91,8 @@ if __name__ == "__main__":
         "distance_estimator",
     ]
 
-    PATH_SAVE_DATA = "data2"
-    PATH_SAVE_MODEL = "trained_models2"
+    PATH_SAVE_DATA = "data"
+    PATH_SAVE_MODEL = "trained_models"
 
     kinds_of_ordering = ["hash"]  # , "map"
     kinds_of_data = ["merged"]  # "separated",
@@ -147,7 +162,6 @@ if __name__ == "__main__":
                             + path_save_data.split("/")[-1]
                             + "/"
                             + model_name
-                            + "_07perc_d2maxtrain"
                         )
 
                         # instantiate

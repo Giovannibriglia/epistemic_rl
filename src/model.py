@@ -168,7 +168,8 @@ class BaseModel(ABC):
             if "loss" in key:
                 plt.plot(epochs, history[key], label=key)
         plt.xlabel("Epoch")
-        plt.ylabel("Train Loss")
+        plt.ylabel("Loss")
+        plt.ylim(0, 1)
         plt.legend(loc="best")
         plt.tight_layout()
         plt.savefig(f"{checkpoint_dir}/train_loss.png")
@@ -182,6 +183,7 @@ class BaseModel(ABC):
         plt.xlabel("Epoch")
         plt.ylabel("Validation Metric")
         plt.legend(loc="best")
+        plt.ylim(-1, 1)
         plt.tight_layout()
         plt.savefig(f"{checkpoint_dir}/validation_metrics.png")
         plt.show()

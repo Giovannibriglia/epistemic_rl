@@ -42,7 +42,7 @@ class DistanceEstimator(nn.Module):
         regressor_hidden_dim: int = 128,
         regressor_blocks: int = 3,
         regressor_dropout: float = 0.2,
-        min_value: float = 1e-5,
+        min_value: float = 1e-3,
     ):
         super().__init__()
         self.use_goal = use_goal
@@ -219,8 +219,8 @@ class OnnxDistanceEstimatorWrapper(nn.Module):
             )
             rep = torch.cat([rep, g_emb], dim=1)
 
-        out = self.regressor(rep).squeeze(1)
-        out = out.clamp(min=self.min_value, max=1 - self.min_value)
+        out = self.core.regressor(rep).squeeze(1)
+        out = out.clamp(min=self.core.min_value, max=1 - self.core.min_value)
         return out
 
     @staticmethod

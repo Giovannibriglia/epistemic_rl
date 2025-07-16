@@ -292,7 +292,7 @@ class DistanceEstimatorModel(BaseModel):
                             c += 1
                         tot += 1
         if verbose:
-            print(f"#errors: {c}/{tot} - {c / tot:.2f} %")
+            print(f"#errors: {c}/{tot} - {(c / tot) * 100:.2f} %")
 
         mse = mean_squared_error(all_targets, all_preds)
         rmse = math.sqrt(mse)
