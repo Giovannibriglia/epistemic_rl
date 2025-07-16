@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import torch
+from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 from src.utils import preprocess_sample
@@ -27,25 +28,29 @@ class GraphDataPipeline:
         folder_data: str,
         kind_of_ordering: str,
         kind_of_data: str,
-        max_samples_for_prob: int,
-        max_unreachable_ratio: float = 0.3,
+        unreachable_state_value: int,
+        max_unreachable_samples_ratio: float = 0.1,
+        max_percentage_per_class: float = 0.15,
+        test_size: float = 0.2,
         use_goal: bool = True,
         use_depth: bool = True,
-        UNREACHABLE_STATE_VALUE: int = 1_000_000,
-        GOAL_DISTANCE_TO_REPLACE: int | None = -1,
+        random_state: int = 42,
     ):
         self.folder_data = Path(folder_data)
         self.ordering = kind_of_ordering
         self.data_kind = kind_of_data
-        self.max_samples = max_samples_for_prob
-        self.max_unreachable_ratio = max_unreachable_ratio
+        self.max_unreachable_samples_ratio = max_unreachable_samples_ratio
+        self.test_size = test_size
         self.use_goal = use_goal
         self.use_depth = use_depth
-        self.UNREACHABLE_STATE_VALUE = UNREACHABLE_STATE_VALUE
-        self.GOAL_DISTANCE_TO_REPLACE = GOAL_DISTANCE_TO_REPLACE
+        self.unreachable_state_value = unreachable_state_value
+        self.max_percentage_per_class = max_percentage_per_class
+        self.random_state = random_state
 
-        self.df: Optional[pd.DataFrame] = None
-        self.samples: List[Dict[str, Any]] = []
+        self.train_df: Optional[pd.DataFrame] = None
+        self.test_df: Optional[pd.DataFrame] = None
+        self.train_samples: List[Dict[str, Any]] = []
+        self.test_samples: List[Dict[str, Any]] = []
 
         self._build_df()
         self._load_samples()
@@ -73,31 +78,107 @@ class GraphDataPipeline:
         df = df.rename(columns={key: "Path State"})
         return df
 
-    def _balance_dataset(self, df: pd.DataFrame) -> pd.DataFrame:
-        counts = df["Distance From Goal"].value_counts()
-        maj = self.UNREACHABLE_STATE_VALUE
-        maj_count = counts.get(maj, 0)
-        max_maj = int(self.max_samples * self.max_unreachable_ratio)
-        maj_df = df[df["Distance From Goal"] == maj].sample(
-            n=min(max_maj, maj_count), random_state=0
+    def _my_train_test_split(
+        self,
+        df: pd.DataFrame,
+        stratify_col: str,
+    ):
+        """
+        Splits df into train and test so that:
+          - Any group in stratify_col with only one sample goes into the training set.
+          - The remaining data is split with stratification on stratify_col.
+
+        Returns (train_df, test_df).
+        """
+        # 1) find the “singleton” groups
+        vc = df[stratify_col].value_counts()
+        singletons = vc[vc == 1].index
+
+        # 2) pull out those singleton rows
+        is_single = df[stratify_col].isin(singletons)
+        df_single = df[is_single]
+        df_main = df[~is_single]
+
+        # 3) stratified split of the “main” data
+        X_main = df_main.drop(columns=[stratify_col])
+        y_main = df_main[stratify_col]
+
+        ts_main = self.test_size / (1 + self.test_size)
+        X_tr, X_te, y_tr, y_te = train_test_split(
+            X_main,
+            y_main,
+            test_size=ts_main,
+            random_state=self.random_state,
+            stratify=y_main,
         )
 
-        other = counts.drop(maj, errors="ignore")
-        remaining = self.max_samples - len(maj_df)
-        per_cls = remaining // max(1, len(other))
+        # 4) rebuild DataFrames, then tack singletons onto train
+        train = pd.concat(
+            [X_tr.assign(**{stratify_col: y_tr}), df_single], axis=0
+        ).sample(frac=1, random_state=self.random_state)
 
-        others = []
-        for cls, cnt in other.items():
-            take = min(per_cls, cnt)
-            sampled = df[df["Distance From Goal"] == cls].sample(n=take, random_state=0)
-            others.append(sampled)
+        test = X_te.assign(**{stratify_col: y_te})
 
-        return pd.concat([maj_df, *others], ignore_index=True).sample(
-            frac=1, random_state=0
-        )
+        return train, test
 
-    def _build_df(self) -> pd.DataFrame:
-        frames = []
+    def _balance_target_feature(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Undersample each class in 'Distance From Goal' so that no class exceeds
+        self.max_percentage_per_class * len(df) samples.
+        """
+        original_len_df = len(df)
+        # Compute the maximum allowed samples per class
+        max_samples_per_class = int(self.max_percentage_per_class * original_len_df)
+
+        balanced_splits = []
+        # Group by target value
+        for value, group in df.groupby("Distance From Goal"):
+            count = len(group)
+            if count > max_samples_per_class:
+                # Randomly sample max_samples_per_class from this class
+                sampled = group.sample(
+                    n=max_samples_per_class, random_state=self.random_state
+                )
+                balanced_splits.append(sampled)
+            else:
+                # Keep the entire group if it's below the threshold
+                balanced_splits.append(group)
+
+        # Concatenate and shuffle the resulting DataFrame
+        balanced_df = pd.concat(balanced_splits)
+        balanced_df = balanced_df.sample(frac=1, random_state=self.random_state)
+        balanced_df = balanced_df.reset_index(drop=True)
+        return balanced_df
+
+    def _balance_dataset(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+
+        reachable = df[df["Distance From Goal"] < self.unreachable_state_value]
+        unreachable = df[df["Distance From Goal"] >= self.unreachable_state_value]
+
+        mask = unreachable["Distance From Goal"] > self.unreachable_state_value
+        unreachable.loc[mask, "Distance From Goal"] = self.unreachable_state_value
+
+        len_unreachable_states_df = len(unreachable)
+        len_reachable_states_df = len(reachable)
+
+        if (
+            self.max_unreachable_samples_ratio * len_reachable_states_df
+            < len_unreachable_states_df
+        ):
+            N = int(self.max_unreachable_samples_ratio * len_reachable_states_df)
+        else:
+            N = len_unreachable_states_df
+
+        sampled_unreachable = unreachable.sample(n=N, random_state=self.random_state)
+
+        new_df = pd.concat([reachable, sampled_unreachable], ignore_index=True)
+
+        new_df = self._balance_target_feature(new_df)
+
+        return self._my_train_test_split(new_df, stratify_col="Distance From Goal")
+
+    def _build_df(self):
+        train_frames, test_frames = [], []
         for prob_dir in self._get_all_items(self.folder_data):
             csv = next(
                 (p for p in self._get_all_items(prob_dir) if p.suffix == ".csv"), None
@@ -106,30 +187,31 @@ class GraphDataPipeline:
                 continue
             df = self._read_csv(csv)
 
-            df["Distance From Goal"] = df["Distance From Goal"].replace(
-                self.GOAL_DISTANCE_TO_REPLACE,
-                self.UNREACHABLE_STATE_VALUE,
-            )
-            df = self._balance_dataset(df)
-            frames.append(df)
-        self.df = pd.concat(frames, ignore_index=True)
+            train_df, test_df = self._balance_dataset(df)
+            train_frames.append(train_df)
+            test_frames.append(test_df)
+        self.train_df = pd.concat(train_frames, ignore_index=True)
+        self.test_df = pd.concat(test_frames, ignore_index=True)
 
-        return self.df
+    def _load_samples(self):
 
-    def _load_samples(self) -> List[Dict[str, Any]]:
-        if self.df is None:
-            raise ValueError("Call build_df() first.")
-        for _, row in tqdm(
-            self.df.iterrows(), total=len(self.df), desc="Building samples..."
-        ):
-            s = preprocess_sample(
-                row["Path State"],
-                int(row["Depth"]) if self.use_depth else None,
-                int(row["Distance From Goal"]),
-                row["Goal"] if self.use_goal else None,
-            )
-            self.samples.append(s)
-        return self.samples
+        s = [self.train_samples, self.test_samples]
+        t = [self.train_df, self.test_df]
+
+        for i, df in enumerate(t):
+            if df is None:
+                raise ValueError("Call build_df() first.")
+
+            desc = "Building train samples..." if i == 0 else "Building test samples..."
+
+            for _, row in tqdm(df.iterrows(), total=len(df), desc=desc):
+                sample = preprocess_sample(
+                    row["Path State"],
+                    int(row["Depth"]) if self.use_depth else None,
+                    int(row["Distance From Goal"]),
+                    row["Goal"] if self.use_goal else None,
+                )
+                s[i].append(sample)
 
     def save(self, out_dir: str, extra_params: Optional[Dict[str, Any]] = None):
         out = Path(out_dir)
@@ -139,15 +221,17 @@ class GraphDataPipeline:
                 "folder_data": str(self.folder_data),
                 "ordering": self.ordering,
                 "data_kind": self.data_kind,
-                "max_samples": self.max_samples,
+                "max_unreachable_ratio": self.max_unreachable_samples_ratio,
                 "use_goal": self.use_goal,
                 **(extra_params or {}),
             },
-            "df": self.df,
-            "samples": self.samples,
+            "train_df": self.train_df,
+            "test_df": self.test_df,
+            "train_samples": self.train_samples,
+            "test_samples": self.test_samples,
         }
-        torch.save(payload, out / "dataloader_info.pt")
-        return out / "dataloader_info.pt"
+        torch.save(payload, out / "samples.pt")
+        return out / "samples.pt"
 
     def get_df(self):
         return self.df

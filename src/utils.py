@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import os
 import random
-import re
+
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Tuple
 
@@ -14,14 +14,13 @@ import torch
 
 from matplotlib import pyplot as plt
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import train_test_split
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from torch_geometric.data import Batch, Data
 from torch_geometric.utils import from_networkx
 
 from src.model import BaseModel
-from src.models.distance_estimator2 import (
+from src.models.distance_estimator import (
     DistanceEstimator,
     OnnxDistanceEstimatorWrapper,
 )
@@ -64,31 +63,6 @@ def get_dataloaders(
     return _build_loader(train_samples, True), _build_loader(eval_samples, False)
 
 
-def merge_rare(y, threshold=2):
-    # Count labels
-    from collections import Counter
-
-    cnt = Counter(y)
-    # Any label with fewer than `threshold` occurrences becomes “other”
-    return ["other" if cnt[label] < threshold else label for label in y]
-
-
-def split_samples(samples, test_ratio=0.2, seed=42):
-    # Extract the list of labels
-    y = [sample["target"] for sample in samples]
-    y_merged = merge_rare(y, threshold=2)
-
-    # Now split, stratifying on y
-    train, test = train_test_split(
-        samples,
-        test_size=test_ratio,
-        shuffle=True,
-        random_state=seed,
-        stratify=y_merged,
-    )
-    return train, test
-
-
 def seed_everything(seed: int = 42):
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
@@ -99,13 +73,8 @@ def seed_everything(seed: int = 42):
     torch.backends.cudnn.benchmark = False
 
 
-_NEG_ID_RE = re.compile(r'(?<![\w"])-\d+(?![\w"])')
-
-
-def _load_dot(path: Path, quote_neg: bool) -> nx.DiGraph:
+def _load_dot(path: Path) -> nx.DiGraph:
     src = path.read_text()
-    """if quote_neg:
-        src = _NEG_ID_RE.sub(lambda m: f'"{m.group(0)}"', src)"""
     dot = pydot.graph_from_dot_data(src)[0]
     return nx.nx_pydot.from_pydot(dot)
 
@@ -209,8 +178,7 @@ def preprocess_sample(
     if_plot_graph: bool = False,
     if_diagnose: bool = False,
 ) -> Dict[str, Any]:
-    fix = "merged" in state_path
-    Gs = _load_dot(Path(state_path), fix)
+    Gs = _load_dot(Path(state_path))
     if if_plot_graph:
         plot_graph(Gs)
     ds = _nx_to_pyg(Gs)
@@ -231,7 +199,7 @@ def preprocess_sample(
         sample["target"] = torch.tensor([target], dtype=torch.float)
 
     if goal_path is not None:
-        Gg = _load_dot(Path(goal_path), True)
+        Gg = _load_dot(Path(goal_path))
         if if_plot_graph:
             plot_graph(Gg)
         dg = _nx_to_pyg(Gg)
@@ -306,6 +274,9 @@ class DistanceEstimatorModel(BaseModel):
         all_preds = []
         all_targets = []
 
+        th = kwargs.get("C", 0.1)
+
+        c, tot = 0, 0
         with torch.no_grad():
             for batch in loader:
                 batch = self._move_batch_to_device(batch)
@@ -316,8 +287,12 @@ class DistanceEstimatorModel(BaseModel):
 
                 if verbose:
                     for i, pred in enumerate(preds):
-                        if not (pred - 0.1 < targets[i] < pred + 0.1):
+                        if not (pred - th < targets[i] < pred + th):
                             print(f"{i}) pred:{pred} | target:{targets[i]}")
+                            c += 1
+                        tot += 1
+        if verbose:
+            print(f"#errors: {c}/{tot} - {c / tot:.2f} %")
 
         mse = mean_squared_error(all_targets, all_preds)
         rmse = math.sqrt(mse)
@@ -408,7 +383,7 @@ def preprocess_for_onnx(
     def _parse_dot(path: Path) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """read DOT → PyG tensors (node-ids, edge_index, edge_attr)"""
 
-        G = _load_dot(path, True)
+        G = _load_dot(path)
         for n, d in G.nodes(data=True):
             d["shape"] = {"circle": 0, "doublecircle": 1}.get(
                 d.get("shape", "circle"), 0
@@ -513,6 +488,5 @@ def select_model(
             DistanceEstimator, use_goal=use_goal, use_depth=use_depth
         )
         return model
-
     else:
         raise NotImplementedError

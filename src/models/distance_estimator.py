@@ -8,6 +8,28 @@ from torch_geometric.nn import GINEConv, global_mean_pool
 TWO_48_MINUS_1 = float(2**48 - 1)
 
 
+class ResidualBlock(nn.Module):
+    """A simple residual block with BatchNorm, ReLU, and Dropout."""
+
+    def __init__(self, dim: int, dropout: float = 0.2):
+        super().__init__()
+        self.lin1 = nn.Linear(dim, dim)
+        self.bn1 = nn.BatchNorm1d(dim)
+        self.lin2 = nn.Linear(dim, dim)
+        self.bn2 = nn.BatchNorm1d(dim)
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        identity = x
+        out = self.lin1(x)
+        out = self.bn1(out)
+        out = F.relu(out)
+        out = self.drop(out)
+        out = self.lin2(out)
+        out = self.bn2(out)
+        return F.relu(out + identity)
+
+
 class DistanceEstimator(nn.Module):
     def __init__(
         self,
@@ -15,13 +37,17 @@ class DistanceEstimator(nn.Module):
         use_goal: bool = True,
         use_depth: bool = True,
         node_emb_dim: int = 64,
-        edge_emb_dim: int = 16,
+        edge_emb_dim: int = 32,
+        # new regressor params
+        regressor_hidden_dim: int = 128,
+        regressor_blocks: int = 3,
+        regressor_dropout: float = 0.2,
     ):
         super().__init__()
         self.use_goal = use_goal
         self.use_depth = use_depth
 
-        # ────────────────────────────────────────────────────────── embeddings
+        # ─────────────────────────────────── node & edge embeddings
         self.id_mlp = nn.Sequential(
             nn.Linear(1, node_emb_dim),
             nn.ReLU(),
@@ -33,7 +59,7 @@ class DistanceEstimator(nn.Module):
             nn.Linear(edge_emb_dim, edge_emb_dim),
         )
 
-        # ──────────────────────────────────────────────────────── GINE (state)
+        # ──────────────────────────────── GINE for “state” graph
         self.state_conv1 = GINEConv(
             nn.Sequential(
                 nn.Linear(node_emb_dim, hidden_dim),
@@ -51,7 +77,7 @@ class DistanceEstimator(nn.Module):
             edge_dim=edge_emb_dim,
         )
 
-        # ───────────────────────────────────────────────────────── GINE (goal)
+        # ──────────────────────────────── optional GINE for “goal” graph
         if use_goal:
             self.goal_conv1 = GINEConv(
                 nn.Sequential(
@@ -70,57 +96,52 @@ class DistanceEstimator(nn.Module):
                 edge_dim=edge_emb_dim,
             )
 
-        # ───────────────────────────────────────────────────────── regressor
+        # ───────────────────── deep residual regressor head
         in_dim = hidden_dim * (2 if use_goal else 1) + (1 if use_depth else 0)
-        self.regressor = nn.Sequential(
-            nn.Linear(in_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
-            nn.Sigmoid(),
-        )
+        layers = [nn.Linear(in_dim, regressor_hidden_dim), nn.ReLU()]
+        for _ in range(regressor_blocks):
+            layers.append(ResidualBlock(regressor_hidden_dim, regressor_dropout))
+        layers.append(nn.Linear(regressor_hidden_dim, 1))
+        layers.append(nn.Sigmoid())  # outputs in (0,1)
+        self.regressor = nn.Sequential(*layers)
 
-    # --------------------------------------------------------------- encode
     def _encode(self, graph, conv1, conv2):
         raw = graph.node_names.to(graph.edge_index.device).float()
         x = self.id_mlp((raw / TWO_48_MINUS_1).clamp(0.0, 1.0).view(-1, 1))
-
         e = self.edge_mlp(graph.edge_attr.to(x.device).float())
         x = F.relu(conv1(x, graph.edge_index, e))
         x = F.relu(conv2(x, graph.edge_index, e))
         return global_mean_pool(x, graph.batch.clone())
 
-    # ---------------------------------------------------------------- forward
-    def forward(self, batch_dict):
+    def forward(self, batch_dict: Dict[str, torch.Tensor]) -> torch.Tensor:
+        # encode state
         s = self._encode(batch_dict["state_graph"], self.state_conv1, self.state_conv2)
 
+        # optionally encode goal and concat
         if self.use_goal and batch_dict.get("goal_graph") is not None:
             g = self._encode(batch_dict["goal_graph"], self.goal_conv1, self.goal_conv2)
             rep = torch.cat([s, g], dim=1)
         else:
             rep = s
 
-        # depth (optional)
+        # optionally append depth
         if self.use_depth:
             d = batch_dict.get("depth")
             if d is None:
-                # allow inference without depth – pad with zeros
                 d = torch.zeros(len(rep), 1, dtype=rep.dtype, device=rep.device)
             else:
                 d = d.float().view(-1, 1)
-            z = torch.cat([rep, d], dim=1)
-        else:
-            z = rep
+            rep = torch.cat([rep, d], dim=1)
 
-        return self.regressor(z).squeeze(1)
+        return self.regressor(rep).squeeze(1)
 
-    # -------------------------------------------------------------- checkpoint
     def get_checkpoint(self) -> Dict:
         cfg = {
             "hidden_dim": self.state_conv1.nn[0].out_features,
             "node_emb_dim": self.id_mlp[0].out_features,
             "edge_emb_dim": self.edge_mlp[0].out_features,
             "use_goal": self.use_goal,
-            "use_depth": self.use_depth,  # ← NEW
+            "use_depth": self.use_depth,
         }
         return {"state_dict": self.state_dict(), "config": cfg}
 
@@ -130,7 +151,7 @@ class DistanceEstimator(nn.Module):
         model = cls(
             hidden_dim=cfg["hidden_dim"],
             use_goal=cfg["use_goal"],
-            use_depth=cfg.get("use_depth", True),  # ← NEW
+            use_depth=cfg.get("use_depth", True),
             node_emb_dim=cfg["node_emb_dim"],
             edge_emb_dim=cfg["edge_emb_dim"],
         )
@@ -139,11 +160,8 @@ class DistanceEstimator(nn.Module):
         return model
 
 
-# ──────────────────────────────────────────────────────────────── ONNX wrapper
-
-
 class OnnxDistanceEstimatorWrapper(nn.Module):
-    def __init__(self, core: "DistanceEstimator"):
+    def __init__(self, core: DistanceEstimator):
         super().__init__()
         self.core = core
 
@@ -164,11 +182,11 @@ class OnnxDistanceEstimatorWrapper(nn.Module):
         s_edge_index,
         s_edge_attr,
         s_batch,
-        depth: Optional[torch.Tensor] = None,
         g_node_ids: Optional[torch.Tensor] = None,
         g_edge_index: Optional[torch.Tensor] = None,
         g_edge_attr: Optional[torch.Tensor] = None,
         g_batch: Optional[torch.Tensor] = None,
+        depth: Optional[torch.Tensor] = None,
     ):
         rep = self._encode_raw(
             s_node_ids,
@@ -195,34 +213,25 @@ class OnnxDistanceEstimatorWrapper(nn.Module):
                 self.core.goal_conv1,
                 self.core.goal_conv2,
             )
-
             rep = torch.cat([rep, g_emb], dim=1)
 
         return self.core.regressor(rep).squeeze(1)
 
     @staticmethod
     def _global_mean(x: torch.Tensor, batch: torch.Tensor) -> torch.Tensor:
-        """
-        ONNX-friendly mean-pool:  scatter-reduce for sum, then divide by count.
-        Works with dynamic batch sizes & graph sizes.
-        """
-        # 1. Sum features per graph  ---------------------------
-        idx = batch.unsqueeze(-1).expand_as(x)  # [V, C]
+        idx = batch.unsqueeze(-1).expand_as(x)
         sums = torch.scatter_reduce(
             torch.zeros(batch.max() + 1, x.size(1), dtype=x.dtype, device=x.device),
             0,
             idx,
             x,
-            reduce="sum",  # default include_self=True
+            reduce="sum",
         )
-
-        # 2. Count nodes per graph  ---------------------------
         cnts = torch.scatter_reduce(
             torch.zeros_like(sums[:, :1]),
             0,
             batch.unsqueeze(-1),
             torch.ones_like(x[:, :1]),
-            reduce="sum",  # default include_self=True
+            reduce="sum",
         )
-
         return sums / cnts.clamp(min=1.0)

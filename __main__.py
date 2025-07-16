@@ -1,7 +1,65 @@
+from typing import Dict, List
+
 import torch
 
 from src.preprocessing import GraphDataPipeline
-from src.utils import get_dataloaders, seed_everything, select_model, split_samples
+from src.utils import get_dataloaders, seed_everything, select_model
+
+
+def print_values(samples):
+    d = {}
+    for s in samples:
+        ss = s["target"].item()
+        if ss in d.keys():
+            d[ss] += 1
+        else:
+            d[ss] = 1
+
+    x = ""
+    z = 0
+    for target in sorted(d):
+        x += f"| Target {target}: {d[target]}"
+        z += d[target]
+    print(x)
+    print(z)
+
+
+def prepare_samples(t_s_copy: List[Dict], t_t_copy: List[Dict], max_p: float):
+    t_s_copy = [s for s in t_s_copy if s["target"].item() != UNREACHABLE_STATE_VALUE]
+    t_t_copy = [s for s in t_t_copy if s["target"].item() != UNREACHABLE_STATE_VALUE]
+
+    max_train = -1
+    for s in t_s_copy:
+        v = s["target"].item()
+        if v > max_train and v != UNREACHABLE_STATE_VALUE:
+            max_train = v
+
+    max_test = -1
+    for s in t_t_copy:
+        v = s["target"].item()
+        if v > max_test and v != UNREACHABLE_STATE_VALUE:
+            max_test = v
+
+    max_all = 2 * max(max_train, max_test)
+
+    C = max_p / max_all
+    print("C = ", C)
+    for s in t_s_copy:
+        v = s["target"].item()
+        if v != UNREACHABLE_STATE_VALUE:
+            s["target"] *= C
+        else:
+            s["target"] = torch.tensor([0.99], dtype=torch.float32)
+
+    for s in t_t_copy:
+        v = s["target"].item()
+        if v != UNREACHABLE_STATE_VALUE:
+            s["target"] *= C
+        else:
+            s["target"] = torch.tensor([0.99], dtype=torch.float32)
+
+    return t_s_copy, t_t_copy, C, max_all
+
 
 if __name__ == "__main__":
     seed_everything()
@@ -15,20 +73,22 @@ if __name__ == "__main__":
 
     MODELS = [
         "distance_estimator",
-        # "reachability_classifier",
     ]
 
-    PATH_SAVE_DATA = "data_no_depth"
-    PATH_SAVE_MODEL = "trained_models_no_depth2"
+    PATH_SAVE_DATA = "data_ok_new"
+    PATH_SAVE_MODEL = "trained_models_ok_new_no_unreachable"
 
     kinds_of_ordering = ["hash"]  # , "map"
-    kinds_of_data = ["separated"]  # "separated",
+    kinds_of_data = ["merged"]  # "separated",
     use_goals = [False]  # , True
     use_depths = [False]  # , True
 
-    MAX_SAMPLES_FOR_CLASS = 15000
-    MAX_UNREACHABLE_SAMPLES_RATIO = 0.15
     N_TRAIN_EPOCHS = 500
+    BATCH_SIZE = 2048
+    MAX_UNREACHABLE_SAMPLES_RATIO = 0.1
+    TEST_SIZE = 0.2
+
+    MAX_PERCENTAGE_REACHABLE_STATES = 0.7
 
     for KIND_OF_ORDERING in kinds_of_ordering:
         for KIND_OF_DATA in kinds_of_data:
@@ -39,15 +99,16 @@ if __name__ == "__main__":
                         f"{PATH_SAVE_DATA}/{DOMAIN}/{KIND_OF_ORDERING}_{KIND_OF_DATA}"
                     )
                     path_save_data += "_goal" if USE_GOAL else "_no_goal"
+                    path_save_data += "_depth" if USE_DEPTH else "_no_depth"
 
                     if IF_BUILD_DATA:
                         pipe = GraphDataPipeline(
                             folder_data=FOLDER_DATA,
                             kind_of_ordering=KIND_OF_ORDERING,
                             kind_of_data=KIND_OF_DATA,
-                            max_samples_for_prob=MAX_SAMPLES_FOR_CLASS,
-                            max_unreachable_ratio=MAX_UNREACHABLE_SAMPLES_RATIO,
-                            UNREACHABLE_STATE_VALUE=UNREACHABLE_STATE_VALUE,
+                            unreachable_state_value=UNREACHABLE_STATE_VALUE,
+                            max_unreachable_samples_ratio=MAX_UNREACHABLE_SAMPLES_RATIO,
+                            test_size=TEST_SIZE,
                             use_goal=USE_GOAL,
                             use_depth=USE_DEPTH,
                         )
@@ -59,89 +120,32 @@ if __name__ == "__main__":
                             },
                         )
 
-                    data_path = path_save_data + "/dataloader_info.pt"
+                    data_path = path_save_data + "/samples.pt"
                     data = torch.load(data_path, weights_only=False)
-                    samples = data["samples"]
+                    train_samples = data["train_samples"]
+                    test_samples = data["test_samples"]
 
                     for model_name in MODELS:
                         print(
                             f"\n Domain: {DOMAIN} | {KIND_OF_ORDERING} | {KIND_OF_DATA} | Use goal: {USE_GOAL} | Use depth: {USE_DEPTH} | Model: {model_name}",
                         )
-                        samples_copy = samples.copy()
+                        train_samples_copy = train_samples.copy()
+                        test_samples_copy = test_samples.copy()
 
-                        if "reachability_classifier" in model_name:
-                            for s in samples_copy:
-                                # extract the old scalar
-                                old = s["target"].item()
-                                # decide new label
-                                new_label = (
-                                    1.0 if old != UNREACHABLE_STATE_VALUE else 0.0
-                                )
-                                # store back as a float tensor of shape [1]
-                                s["target"] = torch.tensor(
-                                    [new_label], dtype=torch.float32
-                                )
+                        train_samples_copy, test_samples_copy, C, max_all = (
+                            prepare_samples(
+                                train_samples_copy,
+                                test_samples_copy,
+                                MAX_PERCENTAGE_REACHABLE_STATES,
+                            )
+                        )
 
-                        elif "distance_estimator" in model_name:
-                            # Filter out unreachable states
-                            samples_copy = [
-                                s
-                                for s in samples_copy
-                                if s["target"] <= UNREACHABLE_STATE_VALUE
-                            ]
-
-                            # Build a dict of real values
-                            real_values = {}
-                            for s in samples_copy:
-                                ss = int(s["target"].item())
-                                if (
-                                    ss != UNREACHABLE_STATE_VALUE
-                                    and ss not in real_values
-                                ):
-                                    real_values[ss] = -1.0  # placeholder
-
-                            # Compute normalized values
-                            MAX_PERCENTAGE = 0.5
-                            max_real_value = max(real_values.keys())
-
-                            for k in list(real_values.keys()):
-                                real_values[k] = max(
-                                    (k * MAX_PERCENTAGE) / max_real_value,
-                                    MAX_PERCENTAGE / (2 * max_real_value),
-                                )
-
-                            # Add mapping for the unreachable state
-                            real_values[UNREACHABLE_STATE_VALUE] = 0.99
-
-                            # Now rewrite targets in-place
-                            for s in samples_copy:
-                                v = int(
-                                    s["target"].item()
-                                )  # this is an int or the unreachable-state constant
-                                normalized = real_values[v]  # lookup by integer
-                                s["target"] = torch.tensor(
-                                    normalized, dtype=torch.float32
-                                )
-
-                            samples_copy = [
-                                s
-                                for s in samples_copy
-                                if s["target"] < 0.99  # UNREACHABLE_STATE_VALUE
-                            ]
-
-                        d = {}
-                        for s in samples_copy:
-                            ss = s["target"].item()
-                            if ss in d.keys():
-                                d[ss] += 1
-                            else:
-                                d[ss] = 1
-                        print("Target values: ", d)
-
-                        train_samples, eval_samples = split_samples(samples_copy)
+                        print_values(train_samples_copy)
+                        print("\n")
+                        print_values(test_samples_copy)
 
                         train_loader, val_loader = get_dataloaders(
-                            train_samples, eval_samples, batch_size=2048
+                            train_samples_copy, test_samples_copy, batch_size=BATCH_SIZE
                         )
 
                         path_model = (
@@ -149,6 +153,7 @@ if __name__ == "__main__":
                             + path_save_data.split("/")[-1]
                             + "/"
                             + model_name
+                            + "_07perc_d2maxtrain"
                         )
 
                         # instantiate
@@ -165,7 +170,16 @@ if __name__ == "__main__":
 
                         # load
                         m.load_model(f"{path_model}/best.pt")
-                        m.evaluate(val_loader, verbose=True)
+
+                        with open(f"{path_model}/C.txt", "w", encoding="utf-8") as f:
+                            f.write(f"C = {C}\n")
+                            f.write(
+                                f"max percentage seen reachable distances = {MAX_PERCENTAGE_REACHABLE_STATES}\n"
+                            )
+                            f.write(f"max depth = {max_all}\n")
+                        kwargs = {"C": C / 2}
+
+                        m.evaluate(val_loader, verbose=True, **kwargs)
                         # single inference
                         if USE_GOAL:
                             if USE_DEPTH:
