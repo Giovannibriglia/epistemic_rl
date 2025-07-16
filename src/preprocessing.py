@@ -194,7 +194,7 @@ class GraphDataPipeline:
                 "folder_data": str(self.folder_data),
                 "ordering": self.ordering,
                 "data_kind": self.data_kind,
-                "max_unreachable_ratio": self.max_unreachable_samples_ratio,
+                "max_percentage_per_class": self.max_percentage_per_class,
                 "use_goal": self.use_goal,
                 **(extra_params or {}),
             },
