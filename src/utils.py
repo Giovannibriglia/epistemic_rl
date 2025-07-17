@@ -277,6 +277,9 @@ class DistanceEstimatorModel(BaseModel):
         th = kwargs.get("C", 0.1)
 
         c, tot = 0, 0
+        if verbose:
+            print("\n Errors:")
+
         with torch.no_grad():
             for batch in loader:
                 batch = self._move_batch_to_device(batch)
@@ -288,7 +291,7 @@ class DistanceEstimatorModel(BaseModel):
                 if verbose:
                     for i, pred in enumerate(preds):
                         if not (pred - th < targets[i] < pred + th):
-                            print(f"{i}) pred:{pred} | target:{targets[i]}")
+                            print(f"{c}) pred:{pred} | target:{targets[i]}")
                             c += 1
                         tot += 1
         if verbose:

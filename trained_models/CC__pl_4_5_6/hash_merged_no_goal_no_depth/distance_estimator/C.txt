@@ -1,0 +1,2 @@
+slope = 0.02
+min_value_nn = 0
