@@ -5,7 +5,7 @@ import os
 import random
 
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import networkx as nx
 import numpy as np
@@ -274,7 +274,7 @@ class DistanceEstimatorModel(BaseModel):
         all_preds = []
         all_targets = []
 
-        th = kwargs.get("C", 0.1)
+        th = kwargs.get("th", 0.1)
 
         c, tot = 0, 0
         if verbose:
@@ -493,3 +493,75 @@ def select_model(
         return model
     else:
         raise NotImplementedError
+
+
+def print_values(samples):
+    d = {}
+    for s in samples:
+        ss = s["target"].item()
+        if ss in d.keys():
+            d[ss] += 1
+        else:
+            d[ss] = 1
+
+    x = ""
+    z = 0
+    for target in sorted(d):
+        x += f"| Target {target}: {d[target]}"
+        z += d[target]
+    print(x, " -- Total samples: ", z)
+
+
+def f(value, slope, min_value_nn, if_forward: bool = True):
+    if if_forward:
+        return value * slope + min_value_nn
+    else:
+        return value / slope - min_value_nn
+
+
+def prepare_samples(
+    t_s_copy: List[Dict], t_t_copy: List[Dict], unreachable_state_value
+):
+
+    t_s_copy = [s for s in t_s_copy if s["target"].item() != unreachable_state_value]
+    t_t_copy = [s for s in t_t_copy if s["target"].item() != unreachable_state_value]
+
+    """def find_max(sss):
+        max_v = -1
+        for s in sss:
+            v = s["target"].item()
+            if v > max_v and v != UNREACHABLE_STATE_VALUE:
+                max_v = v
+        return max_v
+
+    max_train = find_max(t_s_copy)
+    max_test = find_max(t_t_copy)
+
+    max_tot = max(max_train, max_test)"""
+
+    MIN_DEPTH = 0
+    MAX_DEPTH = 50  # if max_tot * 2 > 50 else max_tot * 2
+
+    MIN_V_NN = 1e-3
+    MAX_V_NN = 1 - MIN_V_NN
+
+    slope = (MAX_V_NN - MIN_V_NN) / (MAX_DEPTH - MIN_DEPTH)
+
+    params = {"slope": slope, "min_value_nn": MIN_V_NN}
+
+    print("params: ", params)
+    for s in t_s_copy:
+        v = s["target"].item()
+        if v != unreachable_state_value:
+            s["target"] = torch.tensor(f(v, slope, MIN_V_NN), dtype=torch.float)
+        else:
+            s["target"] = torch.tensor(f(MAX_DEPTH, slope, MIN_V_NN), dtype=torch.float)
+
+    for s in t_t_copy:
+        v = s["target"].item()
+        if v != unreachable_state_value:
+            s["target"] = torch.tensor(f(v, slope, MIN_V_NN), dtype=torch.float)
+        else:
+            s["target"] = torch.tensor(f(MAX_DEPTH, slope, MIN_V_NN), dtype=torch.float)
+
+    return t_s_copy, t_t_copy, params

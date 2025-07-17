@@ -203,5 +203,5 @@ class GraphDataPipeline:
             "train_samples": self.train_samples,
             "test_samples": self.test_samples,
         }
-        torch.save(payload, out / "samples.pt")
-        return out / "samples.pt"
+        torch.save(payload, out)
+        return out
