@@ -239,7 +239,7 @@ def main(args):
 
     m.evaluate(val_loader, verbose=verbose, **kwargs)
 
-    example_state_to_predict = "./examples/to_predict.dot"
+    example_state_to_predict = f"./examples/{kind_of_ordering}_{kind_of_data}_state.pt"
     example_goal = "./examples/goal_tree.dot"
     example_depth = 5
 
