@@ -547,9 +547,8 @@ def prepare_samples(
 
     slope = (MAX_V_NN - MIN_V_NN) / (MAX_DEPTH - MIN_DEPTH)
 
-    params = {"slope": slope, "min_value_nn": MIN_V_NN}
+    params = {"slope": slope, "intercept": MIN_V_NN}
 
-    print("params: ", params)
     for s in t_s_copy:
         v = s["target"].item()
         if v != unreachable_state_value:

@@ -157,6 +157,9 @@ def main(args):
     data_path = path_save_data + "/samples.pt"
 
     print("\n************************************************")
+    print(
+        f"Domain: {domain} | {kind_of_ordering} | {kind_of_data} | Use goal: {use_goal} | Use depth: {use_depth} | Model name: {model_name} | Train: {if_train} | Build Data: {if_build_data}",
+    )
 
     if if_build_data:
         pipe = GraphDataPipeline(
@@ -180,9 +183,6 @@ def main(args):
     train_samples = data["train_samples"]
     test_samples = data["test_samples"]
 
-    print(
-        f"Domain: {domain} | {kind_of_ordering} | {kind_of_data} | Use goal: {use_goal} | Use depth: {use_depth} | Model name: {model_name}",
-    )
     train_samples_copy = train_samples.copy()
     test_samples_copy = test_samples.copy()
 
@@ -195,6 +195,8 @@ def main(args):
         print_values(train_samples_copy)
         print("Test values:")
         print_values(test_samples_copy)
+        print("\n")
+        print("Normalization parameters: ", params_f)
 
     train_loader, val_loader = get_dataloaders(
         train_samples_copy,
@@ -239,29 +241,16 @@ def main(args):
 
     m.evaluate(val_loader, verbose=verbose, **kwargs)
 
-    example_state_to_predict = f"./examples/{kind_of_ordering}_{kind_of_data}_state.pt"
+    example_state_to_predict = f"./examples/{kind_of_ordering}_{kind_of_data}_state.dot"
     example_goal = "./examples/goal_tree.dot"
     example_depth = 5
 
-    # single inference
-    if use_goal:
-        if use_depth:
-            out = m.predict_single(
-                example_state_to_predict,
-                example_depth,
-                example_goal,
-            )
-        else:
-            out = m.predict_single(
-                example_state_to_predict,
-                depth=None,
-                goal_dot=example_goal,
-            )
-    else:
-        if use_depth:
-            out = m.predict_single(example_state_to_predict, example_depth)
-        else:
-            out = m.predict_single(example_state_to_predict)
+    out = m.predict_single(
+        example_state_to_predict,
+        depth=example_depth if use_depth else None,
+        goal_dot=example_goal if use_goal else None,
+    )
+
     print("PyTorch output: ", out)
 
     onnx_model_file = f"{path_model}/{model_name}.onnx"
@@ -270,17 +259,18 @@ def main(args):
     sss = [example_state_to_predict, example_state_to_predict]
     ggg = [example_goal, example_goal]
     ddd = [example_depth, example_depth]
-    if use_goal:
-        if use_depth:
-            out_onnx = m.try_onnx(onnx_model_file, sss, ddd, ggg)
-        else:
-            out_onnx = m.try_onnx(onnx_model_file, sss, None, goal_dot_files=ggg)
-    else:
-        if use_depth:
-            out_onnx = m.try_onnx(onnx_model_file, sss, ddd)
-        else:
-            out_onnx = m.try_onnx(onnx_model_file, sss)
+
+    out_onnx = m.try_onnx(
+        onnx_model_file,
+        sss,
+        depths=ddd if use_depth else None,
+        goal_dot_files=ggg if use_goal else None,
+    )
+
     print("Out onnx: ", out_onnx)
+
+    true_val = 0 * params_f["slope"] + params_f["intercept"]
+    print("True rescaled distance: ", true_val, " -> True Distance: 0")
 
 
 if __name__ == "__main__":
