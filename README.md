@@ -4,14 +4,26 @@
 todo
 
 ## 1. Installation
-1. Create a new python virtual environment with 'python > 3.10'
-2. Install requirements
+1. Create a new python virtual environment (with 'python > 3.10'):
+   ```
+   python -m venv .venv
+   source .venv/bin/activate
+   ```
+2. Install requirements:
    ```
    pip install -r requirements.txt
    ```
-3. Install setup
+3. Install setup:
    ```
    python setup.py install
+   ```
+4. Enable pre‑commit hooks
+   ```
+   pre-commit install
+   ```
+5. Run all hooks against existing files
+   ```
+   pre-commit run --all-files
    ```
 
 ## 2. Usage
