@@ -16,7 +16,7 @@ todo
 
 ## 2. Usage
 
-Invoke your training script (e.g. `train.py`) with the following options:
+Launch `__main__.py` and customize your process with the argparse:
 
 ```bash
 python __main__.py [OPTIONS]
