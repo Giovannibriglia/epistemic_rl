@@ -29,7 +29,16 @@ def parse_args():
     )
     # simple string / numeric args
     parser.add_argument(
-        "--domain", type=str, default="CC__pl_4_5_6", help="Dataset domain identifier"
+        "--train-set",
+        type=str,
+        default="CC__pl_4_5_6",
+        help="Dataset subset_train identifier",
+    )
+    parser.add_argument(
+        "--folder-model-name",
+        default="model",
+        type=str,
+        help="Name of the model folder",
     )
     parser.add_argument(
         "--model-name",
@@ -84,6 +93,12 @@ def parse_args():
     parser.add_argument(
         "--train", type=str2bool, default=True, help="Whether to train the models"
     )
+    parser.add_argument(
+        "--if-try-example",
+        type=str2bool,
+        default=False,
+        help="Inference with pytorch and onnx model on example samples",
+    )
 
     parser.add_argument(
         "--kind-of-ordering",
@@ -129,15 +144,16 @@ def main(args):
     seed = args.seed
     seed_everything(seed)
 
-    domain = args.domain
+    subset_train = args.subset_train
     if_build_data = args.build_data
     if_train = args.train
     kind_of_ordering = args.kind_of_ordering
     kind_of_data = args.kind_of_data
     use_goal = args.use_goal
     use_depth = args.use_depth
+    if_try_example = args.if_try_example
 
-    folder_data = f"{args.folder_data}_{domain}"
+    folder_data = f"{args.folder_data}_{subset_train}"
     path_save_data = args.dir_save_data
     path_save_model = args.dir_save_model
 
@@ -151,14 +167,16 @@ def main(args):
 
     verbose = args.verbose
 
-    path_save_data = f"{path_save_data}/{domain}/{kind_of_ordering}_{kind_of_data}"
-    path_save_data += "_goal" if use_goal else "_no_goal"
-    path_save_data += "_depth" if use_depth else "_no_depth"
+    path_save_data = (
+        f"{path_save_data}/{subset_train}"  # /{kind_of_ordering}_{kind_of_data}"
+    )
+    # path_save_data += "_goal" if use_goal else "_no_goal"
+    # path_save_data += "_depth" if use_depth else "_no_depth"
     data_path = path_save_data + "/samples.pt"
 
     print("\n************************************************")
     print(
-        f"Domain: {domain} | {kind_of_ordering} | {kind_of_data} | Use goal: {use_goal} | Use depth: {use_depth} | Model name: {model_name} | Train: {if_train} | Build Data: {if_build_data}",
+        f"subset_train: {subset_train} | {kind_of_ordering} | {kind_of_data} | Use goal: {use_goal} | Use depth: {use_depth} | Model name: {model_name} | Train: {if_train} | Build Data: {if_build_data}",
     )
 
     if if_build_data:
@@ -207,9 +225,9 @@ def main(args):
     path_model = (
         path_save_model
         + "/"
-        + domain
-        + "/"
-        + path_save_data.split("/")[-1]
+        + subset_train
+        # + "/"
+        # + path_save_data.split("/")[-1]
         + "/"
         + model_name
     )
@@ -241,36 +259,47 @@ def main(args):
 
     m.evaluate(val_loader, verbose=verbose, **kwargs)
 
-    example_state_to_predict = f"./examples/{kind_of_ordering}_{kind_of_data}_state.dot"
-    example_goal = "./examples/goal_tree.dot"
-    example_depth = 5
+    if if_try_example:
+        example_state_to_predict = (
+            f"./examples/{kind_of_ordering}_{kind_of_data}_state.dot"
+        )
+        example_goal = "./examples/goal_tree.dot"
+        example_depth = 5
 
-    out = m.predict_single(
-        example_state_to_predict,
-        depth=example_depth if use_depth else None,
-        goal_dot=example_goal if use_goal else None,
-    )
+        out = m.predict_single(
+            example_state_to_predict,
+            depth=example_depth if use_depth else None,
+            goal_dot=example_goal if use_goal else None,
+        )
 
-    print("PyTorch output: ", out)
+        print("PyTorch output: ", out)
 
-    onnx_model_file = f"{path_model}/{model_name}.onnx"
-    m.to_onnx(onnx_model_file, use_goal, use_depth)
+        onnx_model_file = f"{path_model}/{model_name}.onnx"
+        m.to_onnx(onnx_model_file, use_goal, use_depth)
 
-    sss = [example_state_to_predict, example_state_to_predict]
-    ggg = [example_goal, example_goal]
-    ddd = [example_depth, example_depth]
+        sss = [example_state_to_predict, example_state_to_predict]
+        ggg = [example_goal, example_goal]
+        ddd = [example_depth, example_depth]
 
-    out_onnx = m.try_onnx(
-        onnx_model_file,
-        sss,
-        depths=ddd if use_depth else None,
-        goal_dot_files=ggg if use_goal else None,
-    )
+        out_onnx = m.try_onnx(
+            onnx_model_file,
+            sss,
+            depths=ddd if use_depth else None,
+            goal_dot_files=ggg if use_goal else None,
+        )
 
-    print("Out onnx: ", out_onnx)
+        print("Out onnx: ", out_onnx)
 
-    true_val = 0 * params_f["slope"] + params_f["intercept"]
-    print("True rescaled distance: ", true_val, " -> True Distance: 0")
+        true_val = 0 * params_f["slope"] + params_f["intercept"]
+        print("True rescaled distance: ", true_val, " -> True Distance: 0")
+
+    with open(
+        f"{path_model}/{model_name}_info.txt",
+        "w",
+        encoding="utf-8",
+    ) as fh:
+        for name, value in vars(args).items():
+            fh.write(f"{name} = {value}\n")
 
 
 if __name__ == "__main__":
