@@ -29,14 +29,16 @@ def parse_args():
     )
     # simple string / numeric args
     parser.add_argument(
-        "--train-set",
+        "--subset-train",
+        action="extend",  # collect all values into one list
+        nargs="+",  # each occurrence takes 1+ args
         type=str,
-        default="CC__pl_4_5_6",
-        help="Dataset subset_train identifier",
+        default=[],
+        help="Name(s) of problem subsets to use for training",
     )
     parser.add_argument(
         "--folder-model-name",
-        default="model",
+        default="models",
         type=str,
         help="Name of the model folder",
     )
@@ -47,12 +49,17 @@ def parse_args():
         help="Name for the distance estimator model",
     )
     parser.add_argument(
-        "--folder-data",
+        "--normalization-constants-name",
+        default="C",
+        type=str,
+        help="Name of normalization constants txt file, helpful for rescaling the output of regressor",
+    )
+    parser.add_argument(
+        "--folder-raw-data",
         type=str,
         default="out/NN/Training",
         help="Where to find/build the data",
     )
-
     parser.add_argument(
         "--unreachable-state-value",
         type=int,
@@ -74,6 +81,13 @@ def parse_args():
         default="models",
         help="Directory to save trained models",
     )
+    parser.add_argument(
+        "--experiment-name",
+        type=str,
+        default="new_exp",
+        help="Name of experiment with which data and models will be stored",
+    )
+
     parser.add_argument(
         "--n-train-epochs", type=int, default=500, help="Number of training epochs"
     )
@@ -144,7 +158,7 @@ def main(args):
     seed = args.seed
     seed_everything(seed)
 
-    subset_train = args.subset_train
+    list_subset_train = args.subset_train
     if_build_data = args.build_data
     if_train = args.train
     kind_of_ordering = args.kind_of_ordering
@@ -153,11 +167,14 @@ def main(args):
     use_depth = args.use_depth
     if_try_example = args.if_try_example
 
-    folder_data = f"{args.folder_data}_{subset_train}"
-    path_save_data = args.dir_save_data
+    experiment_name = args.experiment_name
+    folder_raw_data = args.folder_raw_data
+
     path_save_model = args.dir_save_model
+    path_save_data = args.dir_save_data
 
     model_name = args.model_name
+    normalization_constants_name = args.normalization_constants_name
 
     unreachable_state_value = args.unreachable_state_value
     test_size = args.test_size
@@ -167,21 +184,22 @@ def main(args):
 
     verbose = args.verbose
 
-    path_save_data = (
-        f"{path_save_data}/{subset_train}"  # /{kind_of_ordering}_{kind_of_data}"
-    )
+    path_data = (
+        path_save_data + "/" + experiment_name
+    )  # /{kind_of_ordering}_{kind_of_data}"
     # path_save_data += "_goal" if use_goal else "_no_goal"
     # path_save_data += "_depth" if use_depth else "_no_depth"
-    data_path = path_save_data + "/samples.pt"
+    data_path = path_data + "/samples.pt"
 
     print("\n************************************************")
     print(
-        f"subset_train: {subset_train} | {kind_of_ordering} | {kind_of_data} | Use goal: {use_goal} | Use depth: {use_depth} | Model name: {model_name} | Train: {if_train} | Build Data: {if_build_data}",
+        f"subset_train: {list_subset_train} | {kind_of_ordering} | {kind_of_data} | Use goal: {use_goal} | Use depth: {use_depth} | Model name: {model_name} | Train: {if_train} | Build Data: {if_build_data}",
     )
 
     if if_build_data:
         pipe = GraphDataPipeline(
-            folder_data=folder_data,
+            folder_data=folder_raw_data,
+            list_subset_train=list_subset_train,
             kind_of_ordering=kind_of_ordering,
             kind_of_data=kind_of_data,
             unreachable_state_value=unreachable_state_value,
@@ -222,15 +240,7 @@ def main(args):
         batch_size=batch_size,
     )
 
-    path_model = (
-        path_save_model
-        + "/"
-        + subset_train
-        # + "/"
-        # + path_save_data.split("/")[-1]
-        + "/"
-        + model_name
-    )
+    path_model = path_save_model + "/" + experiment_name
 
     # instantiate
     m = select_model(model_name, use_goal, use_depth)
@@ -248,7 +258,7 @@ def main(args):
     m.load_model(f"{path_model}/{model_name}.pt")
 
     with open(
-        f"{path_model}/{model_name}_normalization_constants.txt",
+        f"{path_model}/{model_name}_{normalization_constants_name}.txt",
         "w",
         encoding="utf-8",
     ) as fh:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -26,6 +27,7 @@ class GraphDataPipeline:
     def __init__(
         self,
         folder_data: str,
+        list_subset_train: List,
         kind_of_ordering: str,
         kind_of_data: str,
         unreachable_state_value: int,
@@ -36,6 +38,7 @@ class GraphDataPipeline:
         random_state: int = 42,
     ):
         self.folder_data = Path(folder_data)
+        self.list_subset_train = list_subset_train
         self.ordering = kind_of_ordering
         self.data_kind = kind_of_data
         self.test_size = test_size
@@ -151,6 +154,9 @@ class GraphDataPipeline:
     def _build_df(self):
         train_frames, test_frames = [], []
         for prob_dir in self._get_all_items(self.folder_data):
+            if len(self.list_subset_train) > 0:
+                if os.path.basename(prob_dir) not in self.list_subset_train:
+                    continue
             csv = next(
                 (p for p in self._get_all_items(prob_dir) if p.suffix == ".csv"), None
             )
