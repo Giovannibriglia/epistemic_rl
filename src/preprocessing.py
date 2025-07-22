@@ -36,6 +36,7 @@ class GraphDataPipeline:
         use_goal: bool = True,
         use_depth: bool = True,
         random_state: int = 42,
+        remove_unreachable_goal_states: bool = True,
     ):
         self.folder_data = Path(folder_data)
         self.list_subset_train = list_subset_train
@@ -47,6 +48,7 @@ class GraphDataPipeline:
         self.unreachable_state_value = unreachable_state_value
         self.max_percentage_per_class = max_percentage_per_class
         self.random_state = random_state
+        self.remove_unreachable_goal_states = remove_unreachable_goal_states
 
         self.train_df: Optional[pd.DataFrame] = None
         self.test_df: Optional[pd.DataFrame] = None
@@ -127,13 +129,20 @@ class GraphDataPipeline:
         Undersample each class in 'Distance From Goal' so that no class exceeds
         self.max_percentage_per_class * len(df) samples.
         """
-        original_len_df = len(df)
+        if self.remove_unreachable_goal_states:
+            filtered_df = df.loc[
+                df["Distance From Goal"] != self.unreachable_state_value
+            ].copy()
+        else:
+            filtered_df = df.copy()
+
+        original_len_df = len(filtered_df)
         # Compute the maximum allowed samples per class
         max_samples_per_class = int(self.max_percentage_per_class * original_len_df)
 
         balanced_splits = []
         # Group by target value
-        for value, group in df.groupby(feature):
+        for value, group in filtered_df.groupby(feature):
             count = len(group)
             if count > max_samples_per_class:
                 # Randomly sample max_samples_per_class from this class
@@ -194,7 +203,6 @@ class GraphDataPipeline:
 
     def save(self, out_dir: str, extra_params: Optional[Dict[str, Any]] = None):
         out = Path(out_dir)
-        out.mkdir(parents=True, exist_ok=True)
         payload = {
             "params": {
                 "folder_data": str(self.folder_data),

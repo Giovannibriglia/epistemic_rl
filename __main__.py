@@ -1,4 +1,5 @@
 import argparse
+import os
 
 import torch
 
@@ -183,6 +184,7 @@ def main(args):
     )  # /{kind_of_ordering}_{kind_of_data}"
     # path_save_data += "_goal" if use_goal else "_no_goal"
     # path_save_data += "_depth" if use_depth else "_no_depth"
+    os.makedirs(path_data, exist_ok=True)
     data_path = path_data + "/samples.pt"
 
     print("\n************************************************")
@@ -246,6 +248,7 @@ def main(args):
             val_loader,
             n_epochs=n_train_epochs,
             checkpoint_dir=path_model,
+            model_name=model_name,
         )
 
     # load
@@ -263,6 +266,9 @@ def main(args):
 
     m.evaluate(val_loader, verbose=verbose, **kwargs)
 
+    onnx_model_path = f"{path_model}/{model_name}.onnx"
+    m.to_onnx(onnx_model_path, use_goal, use_depth)
+
     if if_try_example:
         example_state_to_predict = (
             f"./examples/{kind_of_ordering}_{kind_of_data}_state.dot"
@@ -278,15 +284,12 @@ def main(args):
 
         print("PyTorch output: ", out)
 
-        onnx_model_file = f"{path_model}/{model_name}.onnx"
-        m.to_onnx(onnx_model_file, use_goal, use_depth)
-
         sss = [example_state_to_predict, example_state_to_predict]
         ggg = [example_goal, example_goal]
         ddd = [example_depth, example_depth]
 
         out_onnx = m.try_onnx(
-            onnx_model_file,
+            onnx_model_path,
             sss,
             depths=ddd if use_depth else None,
             goal_dot_files=ggg if use_goal else None,
@@ -304,6 +307,8 @@ def main(args):
     ) as fh:
         for name, value in vars(args).items():
             fh.write(f"{name} = {value}\n")
+
+    return onnx_model_path
 
 
 if __name__ == "__main__":

@@ -41,6 +41,7 @@ class BaseModel(ABC):
         self,
         train_loader: torch.utils.data.DataLoader,
         val_loader: torch.utils.data.DataLoader,
+        model_name: str = "model",
         n_epochs: int = N_EPOCHS_DEFAULT,
         checkpoint_dir: str = ".",
         **kwargs,
@@ -84,7 +85,7 @@ class BaseModel(ABC):
             )
 
             if val_metrics["val_loss"] < best_metric:
-                best_path = f"{checkpoint_dir}/best.pt"
+                best_path = f"{checkpoint_dir}/{model_name}.pt"
                 self._save_full_checkpoint(best_path)
 
                 best_metric = val_metrics["val_loss"]
@@ -173,7 +174,8 @@ class BaseModel(ABC):
         plt.legend(loc="best")
         plt.tight_layout()
         plt.savefig(f"{checkpoint_dir}/train_loss.png")
-        plt.show()
+        # plt.show()
+        plt.close()
 
         # 2) All other metrics
         plt.figure(figsize=(6, 4), dpi=500)
@@ -186,7 +188,8 @@ class BaseModel(ABC):
         plt.ylim(-1, 1)
         plt.tight_layout()
         plt.savefig(f"{checkpoint_dir}/validation_metrics.png")
-        plt.show()
+        # plt.show()
+        plt.close()
 
         return history
 
