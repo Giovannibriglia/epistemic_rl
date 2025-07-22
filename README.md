@@ -54,9 +54,6 @@ python __main__.py [OPTIONS]
 
 ### Model & Output Options
 
-* `--folder-model-name <str>`
-  Name of the model folder where checkpoints will be stored.
-  **Default:** `models`
 * `--model-name <str>`
   Name for the distance estimator model (used for filenames and logging).
   **Default:** `distance_estimator`

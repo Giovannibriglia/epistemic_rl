@@ -37,12 +37,6 @@ def parse_args():
         help="Name(s) of problem subsets to use for training",
     )
     parser.add_argument(
-        "--folder-model-name",
-        default="models",
-        type=str,
-        help="Name of the model folder",
-    )
-    parser.add_argument(
         "--model-name",
         default="distance_estimator",
         type=str,
