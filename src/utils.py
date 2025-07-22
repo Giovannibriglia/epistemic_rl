@@ -516,7 +516,7 @@ def f(value, slope, min_value_nn, if_forward: bool = True):
     if if_forward:
         return value * slope + min_value_nn
     else:
-        return value / slope - min_value_nn
+        return (value - min_value_nn) / slope
 
 
 def prepare_samples(
