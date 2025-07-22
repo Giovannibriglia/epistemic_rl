@@ -10,6 +10,6 @@ usort==1.0.4
 tqdm
 pre-commit
 torch-geometric
-pydot
+pydot==3.0.4
 onnx
 onnxscript
