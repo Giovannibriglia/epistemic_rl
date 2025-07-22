@@ -79,7 +79,7 @@ def parse_args():
     parser.add_argument(
         "--experiment-name",
         type=str,
-        default="new_exp",
+        default="",
         help="Name of experiment with which data and models will be stored",
     )
 
@@ -179,9 +179,10 @@ def main(args):
 
     verbose = args.verbose
 
-    path_data = (
-        path_save_data + "/" + experiment_name
-    )  # /{kind_of_ordering}_{kind_of_data}"
+    path_data = path_save_data
+    if experiment_name != "":
+        path_data += "/" + experiment_name
+    # /{kind_of_ordering}_{kind_of_data}"
     # path_save_data += "_goal" if use_goal else "_no_goal"
     # path_save_data += "_depth" if use_depth else "_no_depth"
     os.makedirs(path_data, exist_ok=True)
@@ -236,7 +237,9 @@ def main(args):
         batch_size=batch_size,
     )
 
-    path_model = path_save_model + "/" + experiment_name
+    path_model = path_save_model
+    if experiment_name != "":
+        path_model += "/" + experiment_name
 
     # instantiate
     m = select_model(model_name, use_goal, use_depth)

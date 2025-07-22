@@ -65,7 +65,7 @@ python __main__.py [OPTIONS]
   **Default:** `models`
 * `--experiment-name <str>`
   Identifier for this experiment's data and model outputs.
-  **Default:** `new_exp`
+  **Default:** ``
 
 ### Training Parameters
 
