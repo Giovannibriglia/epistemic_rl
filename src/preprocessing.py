@@ -81,30 +81,26 @@ class GraphDataPipeline:
         df = df.rename(columns={key: "Path State"})
         return df
 
-    def _my_train_test_split(
-        self, df: pd.DataFrame, stratify_col: str = "Distance From Goal"
-    ):
-        """
-        Splits df into train and test so that:
-          - Any group in stratify_col with only one sample goes into the training set.
-          - The remaining data is split with stratification on stratify_col.
-
-        Returns (train_df, test_df).
-        """
-        # 1) find the “singleton” groups
+    def _my_train_test_split(self, df: pd.DataFrame, stratify_col="Distance From Goal"):
+        # 1) pull out singleton labels
         vc = df[stratify_col].value_counts()
         singletons = vc[vc == 1].index
-
-        # 2) pull out those singleton rows
         is_single = df[stratify_col].isin(singletons)
         df_single = df[is_single]
         df_main = df[~is_single]
 
-        # 3) stratified split of the “main” data
+        # 2) prepare for stratified split
         X_main = df_main.drop(columns=[stratify_col])
         y_main = df_main[stratify_col]
+        n_classes = y_main.nunique()
+        n_samples = len(y_main)
 
-        ts_main = self.test_size / (1 + self.test_size)
+        # 3) compute test_size fraction and enforce minimum
+        desired_ratio = self.test_size / (1 + self.test_size)
+        min_frac = n_classes / n_samples
+        ts_main = max(desired_ratio, min_frac)
+
+        # 4) do the split
         X_tr, X_te, y_tr, y_te = train_test_split(
             X_main,
             y_main,
@@ -113,13 +109,12 @@ class GraphDataPipeline:
             stratify=y_main,
         )
 
-        # 4) rebuild DataFrames, then tack singletons onto train
+        # 5) rebuild DataFrames and re‑attach the singletons to train
         train = pd.concat(
             [X_tr.assign(**{stratify_col: y_tr}), df_single], axis=0
         ).sample(frac=1, random_state=self.random_state)
 
         test = X_te.assign(**{stratify_col: y_te})
-
         return train, test
 
     def _balance_dataset(
@@ -176,6 +171,11 @@ class GraphDataPipeline:
             train_df, test_df = self._my_train_test_split(df)
             train_frames.append(train_df)
             test_frames.append(test_df)
+
+        if len(train_frames) == 0 or len(test_frames) == 0:
+            raise ValueError(
+                f"train samples = {len(train_frames)}, test samples = {len(test_frames)}"
+            )
         self.train_df = pd.concat(train_frames, ignore_index=True)
         self.train_df = self._balance_dataset(self.train_df)
         self.test_df = pd.concat(test_frames, ignore_index=True)
