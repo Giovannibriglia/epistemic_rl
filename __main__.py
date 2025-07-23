@@ -87,7 +87,7 @@ def parse_args():
         "--n-train-epochs", type=int, default=500, help="Number of training epochs"
     )
     parser.add_argument(
-        "--batch-size", type=int, default=2048, help="Training batch size"
+        "--batch-size", type=int, default=1024, help="Training batch size"
     )
 
     parser.add_argument("--seed", type=int, default=42, help="Random State")

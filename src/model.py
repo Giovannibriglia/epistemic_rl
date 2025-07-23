@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -159,6 +160,10 @@ class BaseModel(ABC):
 
     @staticmethod
     def save_and_plot_metrics(history, checkpoint_dir, n_epochs):
+
+        file_path = f"{checkpoint_dir}/history_losses.json"
+        with open(file_path, "w") as f:
+            json.dump(history, f, indent=4)
 
         # — after training: plot everything you tracked —
         epochs = range(n_epochs)
