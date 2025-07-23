@@ -1,7 +1,7 @@
 
 ## About the Project
 This project develops an estimator that predicts how far a given state is from the goal within dynamic epistemic search
-trees. Each search space is modeled as a Kripke structure.
+trees. Each search space is modeled as a set of Kripke structures.
 
 ## 1. Installation
 1. Create a new python virtual environment (with 'python > 3.10'):
