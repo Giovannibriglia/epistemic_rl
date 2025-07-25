@@ -67,7 +67,7 @@ def parse_args():
     parser.add_argument(
         "--max-percentage-per-class",
         type=float,
-        default=0.2,
+        default=0.5,
         help="Highest possible percentage for one class in the target variable.",
     )
     parser.add_argument(

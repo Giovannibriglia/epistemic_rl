@@ -177,9 +177,9 @@ class GraphDataPipeline:
                 f"train samples = {len(train_frames)}, test samples = {len(test_frames)}"
             )
         self.train_df = pd.concat(train_frames, ignore_index=True)
-        self.train_df = self._balance_dataset(self.train_df)
+        # self.train_df = self._balance_dataset(self.train_df)
         self.test_df = pd.concat(test_frames, ignore_index=True)
-        self.test_df = self._balance_dataset(self.test_df)
+        # self.test_df = self._balance_dataset(self.test_df)
 
     def _load_samples(self):
 
