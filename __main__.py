@@ -52,7 +52,7 @@ def parse_args():
     parser.add_argument(
         "--folder-raw-data",
         type=str,
-        default="out/NN/training_data",  # "out/NN/Training",
+        default="out/NN/Training",
         help="Where to find/build the data",
     )
     parser.add_argument(
