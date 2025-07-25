@@ -52,7 +52,7 @@ def parse_args():
     parser.add_argument(
         "--folder-raw-data",
         type=str,
-        default="out/NN/Training",
+        default="out/NN/training_data",  # "out/NN/Training",
         help="Where to find/build the data",
     )
     parser.add_argument(
@@ -63,6 +63,12 @@ def parse_args():
     )
     parser.add_argument(
         "--test-size", type=float, default=0.2, help="Fraction of held-out test data"
+    )
+    parser.add_argument(
+        "--max-percentage-per-class",
+        type=float,
+        default=0.2,
+        help="Highest possible percentage for one class in the target variable.",
     )
     parser.add_argument(
         "--dir-save-data",
@@ -173,6 +179,7 @@ def main(args):
 
     unreachable_state_value = args.unreachable_state_value
     test_size = args.test_size
+    max_percentage_per_class = args.max_percentage_per_class
 
     n_train_epochs = args.n_train_epochs
     batch_size = args.batch_size
@@ -200,7 +207,7 @@ def main(args):
             kind_of_ordering=kind_of_ordering,
             kind_of_data=kind_of_data,
             unreachable_state_value=unreachable_state_value,
-            max_percentage_per_class=0.15,
+            max_percentage_per_class=max_percentage_per_class,
             test_size=test_size,
             use_goal=use_goal,
             use_depth=use_depth,

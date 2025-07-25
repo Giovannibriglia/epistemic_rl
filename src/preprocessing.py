@@ -31,7 +31,7 @@ class GraphDataPipeline:
         kind_of_ordering: str,
         kind_of_data: str,
         unreachable_state_value: int,
-        max_percentage_per_class: float = 0.1,
+        max_percentage_per_class: float = 0.2,
         test_size: float = 0.2,
         use_goal: bool = True,
         use_depth: bool = True,

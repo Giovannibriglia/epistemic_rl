@@ -51,6 +51,9 @@ python __main__.py [OPTIONS]
 * `--test-size <float>`
   Fraction of the dataset to reserve for testing (between 0.0 and 1.0).
   **Default:** `0.2`
+* `--max-percentage-per-class <float>`
+  Highest possible percentage for one class in the target variable..
+  **Default:** `0.2`
 
 ### Model & Output Options
 
